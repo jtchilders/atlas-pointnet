@@ -1,0 +1,38 @@
+{
+   "model": {
+      "framework":                     "pytorch",
+      "model":                         "pointnet"
+   },
+   "optimizer": {
+      "name":                          "adam",
+      "lr":                            0.0001
+   },
+   "loss": {
+      "func":                          "pointnet_class_loss",
+      "lrsched":                       "StepLR",
+      "lrsched_step_size":             2
+
+   },
+   "data_handling": {
+      "input_format":                  "csv",
+      "train_glob":                    "/Users/jchilders/workdir/ml_data/atlas/csv_data/100GEV_0ETA_0PHI/train/*",
+      "valid_glob":                    "/Users/jchilders/workdir/ml_data/atlas/csv_data/100GEV_0ETA_0PHI/valid/*",
+      "evt_per_file":                  1,
+      "image_shape":                   [1361,3],
+      "shuffle":                       true,
+      "classes":                       ["l-jet","c-jet","b-jet","electrons"],
+      "class_nums":                    [0,4,5,11]
+   },
+   "training": {
+      "batch_size":                    10,
+      "learning_rate":                 0.0001,
+      "momentum":                      0.9,
+      "beta_1":                        0.9,
+      "beta_2":                        0.999,
+      "epsilon":                       null,
+      "decay":                         0.0001,
+      "epochs":                        10,
+      "verbose":                       1,
+      "steps_per_valid":               100
+   }
+}
