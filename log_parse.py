@@ -195,6 +195,8 @@ def plot_data(data,outputfig):
 
    plt.savefig(outputfig)
 
+   plt.close()
+
 
 if __name__ == "__main__":
    main()

@@ -1,11 +1,12 @@
-#!/usr/bin/env python
-import argparse,logging,glob,socket,json
+#!/usr/bin/env python3
+import argparse,logging,socket,json
 import numpy as np
 from data_handlers import utils as datautils
 import torch
-import time
+import tensorboardX
 
 logger = logging.getLogger(__name__)
+torch.set_printoptions(sci_mode=False,precision=3)
 
 
 def main():
@@ -29,6 +30,7 @@ def main():
 
    parser.add_argument('-i','--input_model_pars',help='if provided, the file will be used to fill the models state dict from a previous run.')
    parser.add_argument('-e','--epochs',type=int,default=-1,help='number of epochs')
+   parser.add_argument('-l','--logdir',help='log directory for tensorboardx')
 
    parser.add_argument('--horovod',default=False, action='store_true', help="Setup for distributed training")
 
@@ -83,6 +85,7 @@ def main():
    logger.info('input_model_pars:   %s',args.input_model_pars)
    logger.info('epochs:             %s',args.epochs)
    logger.info('horovod:            %s',args.horovod)
+   logger.info('logdir:             %s',args.logdir)
    logger.info('num_threads:        %s',torch.get_num_threads())
 
    np.random.seed(args.random_seed)
@@ -117,6 +120,10 @@ def main():
    logger.info('creating batch generators')
    trainds = BatchGenerator(trainlist,config_file)
    validds = BatchGenerator(validlist,config_file)
+
+   writer = None
+   if args.logdir:
+      writer = tensorboardX.SummaryWriter(log_dir=args.logdir)
    
    logger.info('building model')
    if 'pytorch' in config_file['model']['framework']:
@@ -124,20 +131,17 @@ def main():
 
       net = model.get_model(config_file)
 
-      opt = model.setup(net,hvd,config_file)
+      opt,lrsched = model.setup(net,hvd,config_file)
 
       lossfunc = loss.get_loss(config_file)
       accfunc = loss.get_accuracy(config_file)
-
-      if 'lrsched' in config_file['loss']:
-         lrsched = loss.get_scheduler(opt,config_file)
 
       logger.info('model = \n %s',net)
 
       #total_params = sum(p.numel() for p in model.parameters())
       #logger.info('trainable parameters: %s',total_params)
 
-      model.train_model(net,opt,lossfunc,accfunc,lrsched,trainds,validds,config_file)
+      model.train_model(net,opt,lossfunc,accfunc,lrsched,trainds,validds,config_file,writer)
             
 
 def print_module(module,input_shape,input_channels,name=None,indent=0):

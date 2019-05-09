@@ -7,18 +7,31 @@ logger = logging.getLogger(__name__)
 
 def get_model(config):
 
-   if 'pointnet' in config['model']['model']:
+   if 'pointnet2d' in config['model']['model']:
       logger.info('using pointnet model')
       input_shape = config['data_handling']['image_shape']
 
       assert(len(input_shape) == 2)
 
-      nChannels = 1 #input_shape[0]
+      nChannels = 1  # input_shape[0]
       nPoints = input_shape[0]
       nCoords = input_shape[1]
       nClasses = len(config['data_handling']['classes'])
       logger.debug('nChannels = %s, nPoints = %s, nCoords = %s, nClasses = %s',nChannels,nPoints,nCoords,nClasses)
-      model = pointnet.PointNet(nChannels,nPoints,nCoords,nClasses)
+      model = pointnet.PointNet2d(nChannels,nPoints,nCoords,nClasses)
+
+      return model.float()
+   elif 'pointnet1d' in config['model']['model']:
+      logger.info('using pointnet model')
+      input_shape = config['data_handling']['image_shape']
+
+      assert(len(input_shape) == 2)
+
+      nPoints = input_shape[0]
+      nCoords = input_shape[1]
+      nClasses = len(config['data_handling']['classes'])
+      logger.debug('nPoints = %s, nCoords = %s, nClasses = %s',nPoints,nCoords,nClasses)
+      model = pointnet.PointNet1d(nPoints,nCoords,nClasses)
 
       return model.float()
    else:
@@ -30,6 +43,9 @@ def setup(net,hvd,config):
    # get optimizer
    optimizer = opt.get_optimizer(net,config)
 
+   if 'lrsched' in config['optimizer']:
+      lrsched = opt.get_scheduler(optimizer,config)
+
    if config['rank'] == 0 and config['input_model_pars']:
       logger.info('loading model pars from file %s',config['input_model_pars'])
       net.load_state_dict(torch.load(config['input_model_pars']))
@@ -40,10 +56,10 @@ def setup(net,hvd,config):
 
       optimizer = hvd.DistributedOptimizer(optimizer,named_parameters=net.named_parameters())
 
-   return optimizer
+   return optimizer,lrsched
 
 
-def train_model(net,opt,loss,acc,lrsched,trainds,validds,config):
+def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
 
    batch_size = config['training']['batch_size']
    status = config['status']
@@ -60,6 +76,8 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config):
    backward_time = CalcMean.CalcMean()
    batch_time = CalcMean.CalcMean()
 
+   monitor_loss = CalcMean.CalcMean()
+
    valid_batch_counter = 0
    for epoch in range(epochs):
       logger.info(' epoch %s of %s',epoch,epochs)
@@ -69,6 +87,8 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config):
 
       for param_group in opt.param_groups:
          logging.info('learning rate: %s',param_group['lr'])
+         if writer:
+            writer.add_scalar('learning_rate',param_group['lr'],epoch)
 
       net.train()
       batch_counter = 0
@@ -89,6 +109,7 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config):
          logger.debug('got outputs: %s targets: %s',outputs,targets)
 
          loss_value = loss(outputs,targets,endpoints)
+         monitor_loss.add_value(loss_value)
          logger.debug('got loss')
 
          acc_value = acc(outputs,targets)
@@ -112,7 +133,17 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config):
                mean_img_per_second = (forward_time.calc_mean() + backward_time.calc_mean()) / batch_size
                mean_img_per_second = 1. / mean_img_per_second
                
-               logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f  forward time: %6.3f  backward time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),loss_value.item(),acc_value.item(),mean_img_per_second,data_time.calc_mean(),forward_time.calc_mean(),backward_time.calc_mean())
+               logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f  forward time: %6.3f  backward time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),acc_value.item(),mean_img_per_second,data_time.calc_mean(),forward_time.calc_mean(),backward_time.calc_mean())
+               logger.info('running count = %s',trainds.running_class_count)
+               print('prediction = %s' % torch.nn.Softmax()(outputs))
+
+               if writer:
+                  global_batch = epoch * len(trainds) + batch_counter
+                  writer.add_scalar('train/loss',monitor_loss.calc_mean(),global_batch)
+                  writer.add_scalar('train/accuracy',acc_value.item(),global_batch)
+                  writer.add_scalar('train/image_per_second',mean_img_per_second,global_batch)
+
+               monitor_loss = CalcMean.CalcMean()
 
             if batch_counter % nval == 0:
                #logger.info('running validation')
@@ -143,6 +174,11 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config):
                   loss_value = loss(outputs,targets,endpoints)
                   acc_value = acc(outputs,targets)
 
+                  if writer:
+                     global_batch = epoch * len(trainds) + batch_counter
+                     writer.add_scalar('valid/loss',loss_value.item(),global_batch)
+                     writer.add_scalar('valid/accuracy',acc_value.item(),global_batch)
+
                   logger.info('>[%3d of %3d, %5d of %5d]< valid loss: %6.4f valid acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds),loss_value.item(),acc_value.item())
                   
                net.train()
@@ -151,5 +187,3 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config):
                torch.save(net.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
 
          start_data = time.time()
-
-

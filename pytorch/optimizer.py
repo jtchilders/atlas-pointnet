@@ -42,3 +42,31 @@ def get_optimizer(net,config):
 
    else:
       raise Exception('%s optimizer specified but not supported' % config['name'])
+
+
+def get_scheduler(opt,config):
+
+   if 'optimizer' not in config:
+      raise Exception('must include "loss" section in config file')
+
+   config = config['optimizer']
+
+   if 'lrsched' not in config:
+      raise Exception('must include "lrsched" loss section in config file')
+
+   if 'StepLR' in config['lrsched']:
+
+      if 'lrsched_step_size' in config:
+         step_size = config['lrsched_step_size']
+      else:
+         raise Exception('trying to use StepLR scheduler, but no step size defined in config')
+      gamma = 0.1
+      if 'lrsched_gamma' in config:
+         gamma = config['lrsched_gamma']
+      last_epoch = -1
+      if 'lrsched_last_epoch' in config:
+         last_epoch = config['lrsched_last_epoch']
+
+      return torch.optim.lr_scheduler.StepLR(opt,step_size,gamma,last_epoch)
+   else:
+      raise Exception('%s learning rate scheduler is not recognized' % config['lrsched'])

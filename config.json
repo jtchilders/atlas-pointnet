@@ -1,16 +1,17 @@
 {
    "model": {
       "framework":                     "pytorch",
-      "model":                         "pointnet"
+      "model":                         "pointnet1d"
    },
    "optimizer": {
       "name":                          "adam",
-      "lr":                            0.0001
+      "lr":                            0.001,
+      "lrsched":                       "StepLR",
+      "lrsched_step_size":             2,
+      "lrsched_gamma":                 0.5
    },
    "loss": {
-      "func":                          "pointnet_class_loss",
-      "lrsched":                       "StepLR",
-      "lrsched_step_size":             2
+      "func":                          "pointnet_class_loss"
 
    },
    "data_handling": {
@@ -20,19 +21,12 @@
       "evt_per_file":                  1,
       "image_shape":                   [1361,3],
       "shuffle":                       true,
-      "classes":                       ["l-jet","c-jet","b-jet","electrons"],
+      "classes":                       ["l-jet","c-jet","b-jet"],
       "class_nums":                    [0,4,5,11]
    },
    "training": {
-      "batch_size":                    10,
-      "learning_rate":                 0.0001,
-      "momentum":                      0.9,
-      "beta_1":                        0.9,
-      "beta_2":                        0.999,
-      "epsilon":                       null,
-      "decay":                         0.0001,
-      "epochs":                        10,
-      "verbose":                       1,
+      "batch_size":                    20,
+      "epochs":                        100,
       "steps_per_valid":               100
    }
 }

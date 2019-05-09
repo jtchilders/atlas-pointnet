@@ -23,6 +23,8 @@ class BatchGenerator:
 
       self.files_per_rank = int(len(self.filelist) / self.nranks)
 
+      self.running_class_count = np.zeros(self.num_classes)
+
    def set_random_batch_retrieval(self,flag=True):
       self.use_random = flag
 
@@ -39,8 +41,8 @@ class BatchGenerator:
       logger.warning('rank %s processing files %s through %s',self.rank,start_file_index,end_file_index)
       logger.warning('first file after shuffle: %s',self.filelist[0])
       image_counter = 0
-      inputs = np.full([self.batch_size] + self.img_shape,-10)
-      targets = np.full([self.batch_size],-1)
+      inputs = np.full([self.batch_size] + self.img_shape,0)
+      targets = np.full([self.batch_size],0)
 
       for filename in self.filelist[start_file_index:end_file_index]:
 
@@ -49,10 +51,11 @@ class BatchGenerator:
             input,target = file.get()
             inputs[image_counter,:input.shape[0],:input.shape[1]] = input
             targets[image_counter] = self.class_ids.index(target)
+            self.running_class_count[int(targets[image_counter])] += 1
             image_counter += 1
 
             if image_counter == self.batch_size:
-               inputs = torch.from_numpy(inputs).float()
+               inputs = torch.from_numpy(inputs).float().permute(0,2,1)
                targets = torch.from_numpy(targets).long()
                yield (inputs,targets)
 
