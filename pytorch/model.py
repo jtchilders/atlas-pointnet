@@ -173,8 +173,8 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
                      batch_data = next(validds_itr)
                      valid_batch_counter = 0
                   
-                  inputs = batch_data[0]
-                  targets = batch_data[1]
+                  inputs = batch_data[0].to(device)
+                  targets = batch_data[1].to(device)
 
                   logger.debug('valid inputs: %s targets: %s',inputs.shape,targets.shape)
 
