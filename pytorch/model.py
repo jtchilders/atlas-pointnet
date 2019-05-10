@@ -3,7 +3,7 @@ import pytorch.optimizer as opt
 import torch,logging,time
 import CalcMean
 logger = logging.getLogger(__name__)
-torch.set_printoptions(sci_mode=False,precision=3)
+#torch.set_printoptions(sci_mode=False,precision=3)
 
 # detect device available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
