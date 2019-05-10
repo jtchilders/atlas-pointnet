@@ -16,6 +16,12 @@ class BatchGenerator:
       self.nranks       = config_file['nranks']
       self.use_random   = config_file['data_handling']['shuffle']
       self.class_ids    = config_file['data_handling']['class_nums']
+      self.eta_offset   = config_file['data_handling']['eta_offset']
+      self.eta_diviser  = config_file['data_handling']['eta_diviser']
+      self.phi_offset   = config_file['data_handling']['phi_offset']
+      self.phi_diviser  = config_file['data_handling']['phi_diviser']
+      self.r_offset     = config_file['data_handling']['r_offset']
+      self.r_diviser    = config_file['data_handling']['r_diviser']
 
       self.total_images = self.evt_per_file * len(self.filelist)
       self.total_batches = self.total_images // self.batch_size // self.nranks
@@ -55,6 +61,7 @@ class BatchGenerator:
             image_counter += 1
 
             if image_counter == self.batch_size:
+               inputs = self.normalize_inputs(inputs)
                inputs = torch.from_numpy(inputs).float().permute(0,2,1)
                targets = torch.from_numpy(targets).long()
                yield (inputs,targets)
@@ -64,6 +71,18 @@ class BatchGenerator:
                targets = np.zeros([self.batch_size])
          except ValueError:
             logger.exception('received exception while processing file %s',filename)
+
+   def normalize_inputs(self,inputs):
+      # shape: [B,N,4]
+      inputs[...,0] = (inputs[...,0] + self.eta_offset) / self.eta_diviser
+      inputs[...,1] = (inputs[...,1] + self.phi_offset) / self.phi_diviser
+      inputs[...,2] = (inputs[...,2] + self.r_offset) / self.r_diviser
+
+      Et = inputs[...,3]
+      Et_l2norm = np.linalg.norm(Et, axis=1, ord=2)
+      inputs[...,3] = Et / Et_l2norm[...,np.newaxis]
+
+      return inputs
 
 
 class CSVFileGenerator:
@@ -88,7 +107,7 @@ class CSVFileGenerator:
 
    def get_input(self):
       if hasattr(self,'data'):
-         return self.data[['eta','phi','r']]
+         return self.data[['eta','phi','r','Et']]
       else:
          raise Exception('no data attribute')
 
@@ -97,4 +116,6 @@ class CSVFileGenerator:
          return self.data['pid'][0]
       else:
          raise Exception('no data attribute')
+
+
 

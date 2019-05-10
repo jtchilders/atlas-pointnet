@@ -135,13 +135,13 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
                
                logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f  forward time: %6.3f  backward time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),acc_value.item(),mean_img_per_second,data_time.calc_mean(),forward_time.calc_mean(),backward_time.calc_mean())
                logger.info('running count = %s',trainds.running_class_count)
-               print('prediction = %s' % torch.nn.Softmax()(outputs))
+               logger.info('prediction = %s',torch.nn.Softmax(dim=1)(outputs))
 
                if writer:
                   global_batch = epoch * len(trainds) + batch_counter
-                  writer.add_scalar('train/loss',monitor_loss.calc_mean(),global_batch)
-                  writer.add_scalar('train/accuracy',acc_value.item(),global_batch)
-                  writer.add_scalar('train/image_per_second',mean_img_per_second,global_batch)
+                  writer.add_scalars('loss',{'train':monitor_loss.calc_mean()},global_batch)
+                  writer.add_scalars('accuracy',{'train':acc_value.item()},global_batch)
+                  writer.add_scalar('image_per_second',mean_img_per_second,global_batch)
 
                monitor_loss = CalcMean.CalcMean()
 
@@ -176,8 +176,8 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
 
                   if writer:
                      global_batch = epoch * len(trainds) + batch_counter
-                     writer.add_scalar('valid/loss',loss_value.item(),global_batch)
-                     writer.add_scalar('valid/accuracy',acc_value.item(),global_batch)
+                     writer.add_scalars('loss',{'valid':loss_value.item()},global_batch)
+                     writer.add_scalars('accuracy',{'valid':acc_value.item()},global_batch)
 
                   logger.info('>[%3d of %3d, %5d of %5d]< valid loss: %6.4f valid acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds),loss_value.item(),acc_value.item())
                   

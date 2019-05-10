@@ -67,7 +67,7 @@ def pointnet_class_loss(pred,targets,end_points,reg_weight=0.001):
       mat_loss += torch.nn.MSELoss()(diff, torch.eye(tran.shape[1]))
 
    # print('criterion = %s mat_loss = %s' % (classify_loss.item(),mat_loss.item()))
-   loss = classify_loss + mat_loss * 0.001
+   loss = classify_loss + mat_loss * reg_weight
 
    return loss
 
@@ -76,13 +76,11 @@ def multiclass_acc(pred,targets):
 
    # logger.info('>> pred = %s targets = %s',pred,targets)
    pred = torch.softmax(pred,dim=1)
-   # logger.info('softmax = %s',pred)
-   pred = pred.gt(0.4).float()
    # logger.info('gt = %s',pred)
-   pred = pred.argmax(dim=1)
+   pred = pred.argmax(dim=1).float()
    # logger.info('argmax = %s',pred)
 
-   eq = torch.eq(pred,targets)
+   eq = torch.eq(pred,targets.float())
    # logger.info('eq = %s',eq)
 
    return torch.sum(eq).float() / float(targets.shape[0])
