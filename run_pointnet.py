@@ -6,7 +6,7 @@ import torch
 import tensorboardX
 
 logger = logging.getLogger(__name__)
-torch.set_printoptions(sci_mode=False,precision=3)
+
 
 
 def main():

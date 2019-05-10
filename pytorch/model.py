@@ -3,6 +3,7 @@ import pytorch.optimizer as opt
 import torch,logging,time
 import CalcMean
 logger = logging.getLogger(__name__)
+torch.set_printoptions(sci_mode=False,precision=3)
 
 
 def get_model(config):
