@@ -47,7 +47,7 @@ def get_accuracy(config):
          raise Exception('%s loss function is not recognized' % config['loss']['func'])
 
 
-def pointnet_class_loss(pred,targets,end_points,reg_weight=0.001):
+def pointnet_class_loss(pred,targets,end_points,reg_weight=0.001,device='cpu'):
    criterion = torch.nn.CrossEntropyLoss()  # use a Classification Cross-Entropy loss
    classify_loss = criterion(pred, targets)
    # print('prediction = %s' % torch.nn.Softmax()(pred) )
@@ -64,7 +64,7 @@ def pointnet_class_loss(pred,targets,end_points,reg_weight=0.001):
       tran = end_points['feature_trans']
 
       diff = torch.mean(torch.bmm(tran, tran.permute(0, 2, 1)), 0)
-      mat_loss += torch.nn.MSELoss()(diff, torch.eye(tran.shape[1]))
+      mat_loss += torch.nn.MSELoss()(diff, torch.eye(tran.shape[1],device=device))
 
    # print('criterion = %s mat_loss = %s' % (classify_loss.item(),mat_loss.item()))
    loss = classify_loss + mat_loss * reg_weight

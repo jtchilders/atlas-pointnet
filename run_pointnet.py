@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse,logging,socket,json
+import argparse,logging,socket,json,sys
 import numpy as np
 from data_handlers import utils as datautils
 import torch
@@ -73,6 +73,7 @@ def main():
 
    logger.info('rank %s of %s',rank,nranks)
    logger.info('hostname:           %s',socket.gethostname())
+   logger.info('python version:     %s',sys.version)
 
    logger.info('config file:        %s',args.config_file)
    logger.info('num files:          %s',args.num_files)

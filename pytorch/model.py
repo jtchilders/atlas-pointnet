@@ -11,6 +11,11 @@ def get_model(config):
       logger.info('using pointnet model')
       input_shape = config['data_handling']['image_shape']
 
+      # detect device available
+      device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+      config['device'] = device
+      logger.info('device:             %s',device)
+
       assert(len(input_shape) == 2)
 
       nChannels = 1  # input_shape[0]
@@ -32,7 +37,7 @@ def get_model(config):
       nClasses = len(config['data_handling']['classes'])
       logger.debug('nPoints = %s, nCoords = %s, nClasses = %s',nPoints,nCoords,nClasses)
       model = pointnet.PointNet1d(nPoints,nCoords,nClasses)
-
+      model.to(device)
       return model.float()
    else:
       raise Exception('no model specified')
@@ -97,7 +102,9 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
          logger.debug('got training batch %s',batch_counter)
          
          inputs = batch_data[0]
+         inputs.to(config['device'])
          targets = batch_data[1]
+         targets.to(config['device'])
 
          logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
 
@@ -108,7 +115,7 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
          outputs,endpoints = net(inputs)
          logger.debug('got outputs: %s targets: %s',outputs,targets)
 
-         loss_value = loss(outputs,targets,endpoints)
+         loss_value = loss(outputs,targets,endpoints,device=config['device'])
          monitor_loss.add_value(loss_value)
          logger.debug('got loss')
 
@@ -171,7 +178,7 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
                   outputs,endpoints = net(inputs)
                   #true_positive_accuracy,true_or_false_positive_accuracy,filled_grids_accuracy = accuracyCalc.eval_acc(outputs,targets,inputs)
 
-                  loss_value = loss(outputs,targets,endpoints)
+                  loss_value = loss(outputs,targets,endpoints,device=config['device'])
                   acc_value = acc(outputs,targets)
 
                   if writer:
