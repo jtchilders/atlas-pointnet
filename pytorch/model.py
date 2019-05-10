@@ -27,7 +27,7 @@ def get_model(config):
       logger.debug('nChannels = %s, nPoints = %s, nCoords = %s, nClasses = %s',nChannels,nPoints,nCoords,nClasses)
       model = pointnet.PointNet2d(nChannels,nPoints,nCoords,nClasses)
       model.to(device)
-      return model.float()
+      return model
    elif 'pointnet1d' in config['model']['model']:
       logger.info('using pointnet model')
       input_shape = config['data_handling']['image_shape']
@@ -40,7 +40,7 @@ def get_model(config):
       logger.debug('nPoints = %s, nCoords = %s, nClasses = %s',nPoints,nCoords,nClasses)
       model = pointnet.PointNet1d(nPoints,nCoords,nClasses)
       model.to(device)
-      return model.float()
+      return model
    else:
       raise Exception('no model specified')
 
@@ -98,15 +98,16 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
             writer.add_scalar('learning_rate',param_group['lr'],epoch)
 
       net.train()
+      net.to(device)
       batch_counter = 0
       start_data = time.time()
       for batch_data in trainds.batch_gen():
          logger.debug('got training batch %s',batch_counter)
          
          inputs = batch_data[0]
-         inputs.to(device)
+         inputs = inputs.to(device)
          targets = batch_data[1]
-         targets.to(device)
+         targets = targets.to(device)
 
          logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
 
