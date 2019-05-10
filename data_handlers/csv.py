@@ -74,15 +74,18 @@ class BatchGenerator:
 
    def normalize_inputs(self,inputs):
       # shape: [B,N,4]
-      inputs[...,0] = (inputs[...,0] + self.eta_offset) / self.eta_diviser
-      inputs[...,1] = (inputs[...,1] + self.phi_offset) / self.phi_diviser
-      inputs[...,2] = (inputs[...,2] + self.r_offset) / self.r_diviser
-
-      Et = inputs[...,3]
-      Et_l2norm = np.linalg.norm(Et, axis=1, ord=2)
-      inputs[...,3] = Et / Et_l2norm[...,np.newaxis]
+      inputs[...,0] = norm_mean_std(inputs[...,0])
+      inputs[...,1] = norm_mean_std(inputs[...,1])
+      inputs[...,2] = norm_mean_std(inputs[...,2])
+      inputs[...,3] = norm_mean_std(inputs[...,3])
 
       return inputs
+
+
+def norm_mean_std(x):
+   mean = x.mean(axis=1).reshape(1,-1).transpose()
+   std = x.std(axis=1).reshape(1,-1).transpose()
+   return np.divide(x - mean,std,out=np.zeros_like(x,dtype='d'),where=std!=0)
 
 
 class CSVFileGenerator:
@@ -116,6 +119,3 @@ class CSVFileGenerator:
          return self.data['pid'][0]
       else:
          raise Exception('no data attribute')
-
-
-
