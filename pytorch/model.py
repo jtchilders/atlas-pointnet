@@ -1,5 +1,7 @@
 import pytorch.pointnet as pointnet
 import pytorch.optimizer as opt
+import numpy as np
+from sklearn.metrics import confusion_matrix
 import torch,logging,time
 import CalcMean
 logger = logging.getLogger(__name__)
@@ -197,3 +199,67 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
                torch.save(net.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
 
          start_data = time.time()
+
+
+def valid_model(net,validds,config):
+
+   batch_size = config['training']['batch_size']
+   status = config['status']
+   nClasses = len(config['data_handling']['classes'])
+
+   data_time = CalcMean.CalcMean()
+   forward_time = CalcMean.CalcMean()
+   backward_time = CalcMean.CalcMean()
+   batch_time = CalcMean.CalcMean()
+
+   net.eval()
+   net.to(device)
+   batch_counter = 0
+   start_data = time.time()
+
+   confmat = np.zeros(nClasses,nClasses)
+
+   for batch_data in validds.batch_gen():
+      logger.debug('got validation batch %s',batch_counter)
+      
+      inputs = batch_data[0].to(device)
+      targets = batch_data[1].to(device)
+
+      logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
+
+      start_forward = time.time()
+
+      logger.debug('zeroed opt')
+      outputs,endpoints = net(inputs)
+      logger.debug('got outputs: %s targets: %s',outputs,targets)
+
+      # logger.info('>> pred = %s targets = %s',pred,targets)
+      outputs = torch.softmax(outputs,dim=1)
+      # logger.info('gt = %s',pred)
+      pred = outputs.argmax(dim=1).float()
+      # logger.info('argmax = %s',pred)
+
+      eq = torch.eq(pred,targets.float())
+      # logger.info('eq = %s',eq)
+
+      accuracy = torch.sum(eq).float() / float(targets.shape[0])
+      batch_confmat = confusion_matrix(pred,targets)
+      confmat += batch_confmat
+
+      end = time.time()
+
+      data_time.add_value(start_forward - start_data)
+      forward_time.add_value(end - start_forward)
+      batch_time.add_value(end - start_data)
+
+      batch_counter += 1
+
+      # print statistics
+      if config['rank'] == 0 and batch_counter % status == 0:
+         mean_img_per_second = (forward_time.calc_mean() + backward_time.calc_mean()) / batch_size
+         mean_img_per_second = 1. / mean_img_per_second
+         
+         logger.info('<[%5d of %5d]> valid accuracy: %6.4f images/sec: %6.2f   data time: %6.3f  forward time: %6.3f confmat = %s',batch_counter,len(validds),accuracy,mean_img_per_second,data_time.calc_mean(),forward_time.calc_mean(),confmat)
+         logger.info('prediction = %s',pred)
+
+      start_data = time.time()

@@ -84,3 +84,5 @@ def multiclass_acc(pred,targets):
    # logger.info('eq = %s',eq)
 
    return torch.sum(eq).float() / float(targets.shape[0])
+
+

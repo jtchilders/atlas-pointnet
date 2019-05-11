@@ -28,6 +28,8 @@ def main():
 
    parser.add_argument('--random_seed',default=0,type=int,help='numpy random seed')
 
+   parser.add_argument('--valid_only',default=False,action='store_true',help='flag that triggers validation run. prints confusion matrix.')
+
    parser.add_argument('-i','--input_model_pars',help='if provided, the file will be used to fill the models state dict from a previous run.')
    parser.add_argument('-e','--epochs',type=int,default=-1,help='number of epochs')
    parser.add_argument('-l','--logdir',help='log directory for tensorboardx')
@@ -79,6 +81,7 @@ def main():
    logger.info('num files:          %s',args.num_files)
    logger.info('model_save:         %s',args.model_save)
    logger.info('random_seed:        %s',args.random_seed)
+   logger.info('valid_only:         %s',args.valid_only)
    logger.info('nsave:              %s',args.nsave)
    logger.info('nval:               %s',args.nval)
    logger.info('nval_tests:         %s',args.nval_tests)
@@ -101,6 +104,11 @@ def main():
    config_file['nval_tests'] = args.nval_tests
    config_file['nsave'] = args.nsave
    config_file['model_save'] = args.model_save
+   config_file['valid_only'] = args.valid_only
+
+   if args.valid_only and not args.input_model_pars:
+      logger.error('if valid_only set, must provide input model')
+      return
 
    if args.batch > 0:
       config_file['training']['batch_size'] = args.batch
@@ -142,7 +150,10 @@ def main():
       #total_params = sum(p.numel() for p in model.parameters())
       #logger.info('trainable parameters: %s',total_params)
 
-      model.train_model(net,opt,lossfunc,accfunc,lrsched,trainds,validds,config_file,writer)
+      if args.valid_only:
+         model.valid_mode(net,validds,config_file)
+      else:
+         model.train_model(net,opt,lossfunc,accfunc,lrsched,trainds,validds,config_file,writer)
             
 
 def print_module(module,input_shape,input_channels,name=None,indent=0):
