@@ -57,7 +57,7 @@ def setup(net,hvd,config):
 
    if config['rank'] == 0 and config['input_model_pars']:
       logger.info('loading model pars from file %s',config['input_model_pars'])
-      net.load_state_dict(torch.load(config['input_model_pars']))
+      net.load_state_dict(torch.load(config['input_model_pars'],map_location=lambda storage, loc: storage))
 
    if config['horovod']:
       logger.info('hvd broadcast')
@@ -217,7 +217,7 @@ def valid_model(net,validds,config):
    batch_counter = 0
    start_data = time.time()
 
-   confmat = np.zeros(nClasses,nClasses)
+   confmat = np.zeros((nClasses,nClasses))
 
    for batch_data in validds.batch_gen():
       logger.debug('got validation batch %s',batch_counter)
@@ -243,8 +243,11 @@ def valid_model(net,validds,config):
       # logger.info('eq = %s',eq)
 
       accuracy = torch.sum(eq).float() / float(targets.shape[0])
-      batch_confmat = confusion_matrix(pred,targets)
-      confmat += batch_confmat
+      try:
+         batch_confmat = confusion_matrix(pred,targets)
+         confmat += batch_confmat
+      except:
+         logger.exception('error %s %s',batch_confmat,confmat)
 
       end = time.time()
 
