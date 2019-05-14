@@ -16,12 +16,6 @@ class BatchGenerator:
       self.nranks       = config_file['nranks']
       self.use_random   = config_file['data_handling']['shuffle']
       self.class_ids    = config_file['data_handling']['class_nums']
-      self.eta_offset   = config_file['data_handling']['eta_offset']
-      self.eta_diviser  = config_file['data_handling']['eta_diviser']
-      self.phi_offset   = config_file['data_handling']['phi_offset']
-      self.phi_diviser  = config_file['data_handling']['phi_diviser']
-      self.r_offset     = config_file['data_handling']['r_offset']
-      self.r_diviser    = config_file['data_handling']['r_diviser']
 
       self.total_images = self.evt_per_file * len(self.filelist)
       self.total_batches = self.total_images // self.batch_size // self.nranks
@@ -47,15 +41,15 @@ class BatchGenerator:
       logger.warning('rank %s processing files %s through %s',self.rank,start_file_index,end_file_index)
       logger.warning('first file after shuffle: %s',self.filelist[0])
       image_counter = 0
-      inputs = np.full([self.batch_size] + self.img_shape,0)
-      targets = np.full([self.batch_size],0)
+      inputs = np.zeros([self.batch_size] + self.img_shape)
+      targets = np.zeros([self.batch_size])
 
       for filename in self.filelist[start_file_index:end_file_index]:
 
          try:
             file = CSVFileGenerator(filename)
             input,target = file.get()
-            inputs[image_counter,:input.shape[0],:input.shape[1]] = input
+            inputs[image_counter,] = np.tile(input,(int(input.shape[0] / self.img_shape[0]) + 1,1))[:self.img_shape[0],...]
             targets[image_counter] = self.class_ids.index(target)
             self.running_class_count[int(targets[image_counter])] += 1
             image_counter += 1
