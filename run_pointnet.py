@@ -151,7 +151,7 @@ def main():
       #logger.info('trainable parameters: %s',total_params)
 
       if args.valid_only:
-         model.valid_mode(net,validds,config_file)
+         model.valid_model(net,validds,config_file)
       else:
          model.train_model(net,opt,lossfunc,accfunc,lrsched,trainds,validds,config_file,writer)
             
