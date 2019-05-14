@@ -49,7 +49,7 @@ class BatchGenerator:
          try:
             file = CSVFileGenerator(filename)
             input,target = file.get()
-            inputs[image_counter,] = np.tile(input,(int(input.shape[0] / self.img_shape[0]) + 1,1))[:self.img_shape[0],...]
+            inputs[image_counter,...] = np.tile(input,(int(self.img_shape[0] / input.shape[0]) + 1,1))[:self.img_shape[0],...]
             targets[image_counter] = self.class_ids.index(target)
             self.running_class_count[int(targets[image_counter])] += 1
             image_counter += 1
