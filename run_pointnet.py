@@ -30,6 +30,8 @@ def main():
 
    parser.add_argument('--valid_only',default=False,action='store_true',help='flag that triggers validation run. prints confusion matrix.')
 
+   parser.add_argument('--batch_limiter',help='if set to an integer, will limit the number of batches during training. Use this to create short training runs for profiling.')
+
    parser.add_argument('-i','--input_model_pars',help='if provided, the file will be used to fill the models state dict from a previous run.')
    parser.add_argument('-e','--epochs',type=int,default=-1,help='number of epochs')
    parser.add_argument('-l','--logdir',help='log directory for tensorboardx')
@@ -90,6 +92,7 @@ def main():
    logger.info('epochs:             %s',args.epochs)
    logger.info('horovod:            %s',args.horovod)
    logger.info('logdir:             %s',args.logdir)
+   logger.info('batch_limiter:      %s',args.batch_limiter)
    logger.info('num_threads:        %s',torch.get_num_threads())
 
    np.random.seed(args.random_seed)
@@ -105,6 +108,7 @@ def main():
    config_file['nsave'] = args.nsave
    config_file['model_save'] = args.model_save
    config_file['valid_only'] = args.valid_only
+   config_file['batch_limiter'] = args.batch_limiter
 
    if args.valid_only and not args.input_model_pars:
       logger.error('if valid_only set, must provide input model')
