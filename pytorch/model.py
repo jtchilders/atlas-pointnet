@@ -77,6 +77,7 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
    nval_tests = config['nval_tests']
    nsave = config['nsave']
    model_save = config['model_save']
+   batch_limiter = config['batch_limiter']
 
    validds_itr = validds.batch_gen()
 
@@ -104,25 +105,27 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
       batch_counter = 0
       start_data = time.time()
       for batch_data in trainds.batch_gen():
-         logger.debug('got training batch %s',batch_counter)
+         end_data = time.time()
+         # logger.debug('got training batch %s',batch_counter)
          
          inputs = batch_data[0]
          inputs = inputs.to(device)
          targets = batch_data[1]
          targets = targets.to(device)
 
-         logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
+         # logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
 
-         start_forward = time.time()
-
+         
          opt.zero_grad()
-         logger.debug('zeroed opt')
+         # logger.debug('zeroed opt')
+         start_forward = time.time()
          outputs,endpoints = net(inputs)
-         logger.debug('got outputs: %s targets: %s',outputs,targets)
+         end_forward = time.time()
+         # logger.debug('got outputs: %s targets: %s',outputs,targets)
 
          loss_value = loss(outputs,targets,endpoints,device=device)
          monitor_loss.add_value(loss_value)
-         logger.debug('got loss')
+         # logger.debug('got loss')
 
          acc_value = acc(outputs,targets)
 
@@ -130,12 +133,12 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
          loss_value.backward()
          opt.step()
 
-         end = time.time()
+         end_backward = time.time()
 
-         data_time.add_value(start_forward - start_data)
-         forward_time.add_value(start_backward - start_forward)
-         backward_time.add_value(end - start_backward)
-         batch_time.add_value(end - start_data)
+         data_time.add_value(end_data - start_data)
+         forward_time.add_value(end_forward - start_forward)
+         backward_time.add_value(end_backward - start_backward)
+         batch_time.add_value(end_backward - start_data)
 
          batch_counter += 1
 
@@ -145,9 +148,9 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
                mean_img_per_second = (forward_time.calc_mean() + backward_time.calc_mean()) / batch_size
                mean_img_per_second = 1. / mean_img_per_second
                
-               logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f  forward time: %6.3f  backward time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),acc_value.item(),mean_img_per_second,data_time.calc_mean(),forward_time.calc_mean(),backward_time.calc_mean())
-               logger.info('running count = %s',trainds.running_class_count)
-               logger.info('prediction = %s',torch.nn.Softmax(dim=1)(outputs))
+               logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f  forward time: %6.3f  backward time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),acc_value.item(),mean_img_per_second,data_time.calc_mean(),forward_time.calc_mean(),backward_time.calc_mean(),batch_time.calc_mean())
+               # logger.info('running count = %s',trainds.running_class_count)
+               # logger.info('prediction = %s',torch.nn.Softmax(dim=1)(outputs))
 
                if writer:
                   global_batch = epoch * len(trainds) + batch_counter
@@ -178,7 +181,7 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
                   inputs = batch_data[0].to(device)
                   targets = batch_data[1].to(device)
 
-                  logger.debug('valid inputs: %s targets: %s',inputs.shape,targets.shape)
+                  # logger.debug('valid inputs: %s targets: %s',inputs.shape,targets.shape)
 
                   outputs,endpoints = net(inputs)
                   #true_positive_accuracy,true_or_false_positive_accuracy,filled_grids_accuracy = accuracyCalc.eval_acc(outputs,targets,inputs)
@@ -197,6 +200,9 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
 
             if batch_counter % nsave == 0:
                torch.save(net.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
+
+         if batch_limiter and batch_counter > batch_limiter:
+            return
 
          start_data = time.time()
 
@@ -244,10 +250,10 @@ def valid_model(net,validds,config):
 
       accuracy = torch.sum(eq).float() / float(targets.shape[0])
       try:
-         batch_confmat = confusion_matrix(pred,targets)
+         batch_confmat = confusion_matrix(pred,targets,labels=range(len(config['data_handling']['classes'])))
          confmat += batch_confmat
       except:
-         logger.exception('error %s %s',batch_confmat,confmat)
+         logger.exception('error batch_confmat = \n %s confmat = \n %s pred = \n %s targets = \n%s',batch_confmat,confmat,pred,targets)
 
       end = time.time()
 
