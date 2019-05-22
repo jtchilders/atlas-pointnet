@@ -82,6 +82,7 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
    validds_itr = validds.batch_gen()
 
    data_time = CalcMean.CalcMean()
+   move_time = CalcMean.CalcMean()
    forward_time = CalcMean.CalcMean()
    backward_time = CalcMean.CalcMean()
    batch_time = CalcMean.CalcMean()
@@ -106,16 +107,17 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
       start_data = time.time()
       for batch_data in trainds.batch_gen():
          end_data = time.time()
-         # logger.debug('got training batch %s',batch_counter)
          
+         # logger.debug('got training batch %s',batch_counter)
+         start_move = end_data
          inputs = batch_data[0]
          inputs = inputs.to(device)
          targets = batch_data[1]
          targets = targets.to(device)
+         end_move = time.time()
 
          # logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
 
-         
          opt.zero_grad()
          # logger.debug('zeroed opt')
          start_forward = time.time()
@@ -136,6 +138,7 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
          end_backward = time.time()
 
          data_time.add_value(end_data - start_data)
+         move_time.add_value(end_move - start_move)
          forward_time.add_value(end_forward - start_forward)
          backward_time.add_value(end_backward - start_backward)
          batch_time.add_value(end_backward - start_data)
@@ -148,7 +151,7 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
                mean_img_per_second = (forward_time.calc_mean() + backward_time.calc_mean()) / batch_size
                mean_img_per_second = 1. / mean_img_per_second
                
-               logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f  forward time: %6.3f  backward time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),acc_value.item(),mean_img_per_second,data_time.calc_mean(),forward_time.calc_mean(),backward_time.calc_mean(),batch_time.calc_mean())
+               logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f move time: %6.3f forward time: %6.3f  backward time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),acc_value.item(),mean_img_per_second,data_time.calc_mean(),move_time.calc_mean(),forward_time.calc_mean(),backward_time.calc_mean(),batch_time.calc_mean())
                # logger.info('running count = %s',trainds.running_class_count)
                # logger.info('prediction = %s',torch.nn.Softmax(dim=1)(outputs))
 
