@@ -15,20 +15,16 @@
 
    },
    "data_handling": {
-      "input_format":                  "csv",
+      "input_format":                  "csv_pool",
       "train_glob":                    "/Users/jchilders/workdir/ml_data/atlas/csv_data/100GEV_0ETA_0PHI/train/*",
-      "valid_glob":                    "/Users/jchilders/workdir/ml_data/atlas/csv_data/100GEV_0ETA_0PHI/valid/*",
+      "valid_glob":                    "/Users/jchilders/git/atlas-pointnet/valid/*",
       "evt_per_file":                  1,
       "image_shape":                   [1361,4],
       "shuffle":                       true,
-      "classes":                       ["l-jet","c-jet","b-jet"],
-      "class_nums":                    [0,4,5,11],
-      "eta_offset":                    -3,
-      "eta_diviser":                    6,
-      "phi_offset":                    -3.1415926536,
-      "phi_diviser":                   6.2831853072,
-      "r_offset":                      0,
-      "r_diviser":                     4000
+      "classes":                       ["l-jet","c-jet","b-jet","electron","muon"],
+      "class_nums":                    [0,4,5,11,13],
+      "pool_size":                     10,
+      "queue_depth":                   20
    },
    "training": {
       "batch_size":                    20,
