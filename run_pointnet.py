@@ -121,19 +121,29 @@ def main():
 
    logger.info('configuration = \n%s',json.dumps(config_file, indent=4, sort_keys=True))
 
-   if 'csv' in config_file['data_handling']['input_format']:
-      logger.info('using CSV data handler')
-      from data_handlers.csv import BatchGenerator
-   else:
-      raise Exception('no input file format specified in configuration')
-   
    logger.info('getting filelists')
    trainlist,validlist = datautils.get_filelist(config_file)
 
-   logger.info('creating batch generators')
-   trainds = BatchGenerator(trainlist,config_file)
-   validds = BatchGenerator(validlist,config_file)
+   if 'csv' == config_file['data_handling']['input_format']:
+      logger.info('using CSV data handler')
+      from data_handlers.csv_format import BatchGenerator
+      logger.info('creating batch generators')
+      trainds = BatchGenerator(trainlist,config_file)
+      validds = BatchGenerator(validlist,config_file)
 
+   elif 'csv_pool' == config_file['data_handling']['input_format']:
+      logger.info('using CSV pool data handler')
+      from data_handlers.csv_format import BatchGeneratorPool
+      logger.info('creating batch generators')
+      trainds = BatchGeneratorPool(trainlist,config_file)
+      trainds.start()
+      validds = BatchGeneratorPool(validlist,config_file)
+      validds.start()
+   else:
+      raise Exception('no input file format specified in configuration')
+   
+   
+   
    writer = None
    if args.logdir:
       writer = tensorboardX.SummaryWriter(log_dir=args.logdir)
