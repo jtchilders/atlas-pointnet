@@ -128,21 +128,19 @@ def main():
       logger.info('using CSV data handler')
       from data_handlers.csv_format import BatchGenerator
       logger.info('creating batch generators')
-      trainds = BatchGenerator(trainlist,config_file)
-      validds = BatchGenerator(validlist,config_file)
+      trainds = BatchGenerator(trainlist,config_file,'BatchGen:train')
+      validds = BatchGenerator(validlist,config_file,'BatchGen:valid')
 
    elif 'csv_pool' == config_file['data_handling']['input_format']:
       logger.info('using CSV pool data handler')
       from data_handlers.csv_format import BatchGeneratorPool
       logger.info('creating batch generators')
-      trainds = BatchGeneratorPool(trainlist,config_file)
+      trainds = BatchGeneratorPool(trainlist,config_file,'BatchGenPool:train')
       trainds.start()
-      validds = BatchGeneratorPool(validlist,config_file)
+      validds = BatchGeneratorPool(validlist,config_file,'BatchGenPool:valid')
       validds.start()
    else:
       raise Exception('no input file format specified in configuration')
-   
-   
    
    writer = None
    if args.logdir:

@@ -4,14 +4,18 @@ import numpy as np
 import pandas as pd
 logger = logging.getLogger(__name__)
 
-csv_mgr = None
+csv_mgr = []
 csv_q = []
+csv_new_epoch = []
+csv_exit = []
 
 
 class BatchGeneratorPool(multiprocessing.Process):
-   def __init__(self,filelist,config_file):
+   def __init__(self,filelist,config_file,log_label=__name__):
       super(BatchGeneratorPool,self).__init__()
-      global csv_mgr,csv_q
+      global csv_mgr,csv_q,logger,csv_new_epoch,csv_exit
+      self.logger = logging.getLogger(log_label)
+
       self.config_file  = config_file
       self.filelist     = np.array(filelist)
       self.evt_per_file = config_file['data_handling']['evt_per_file']
@@ -34,9 +38,11 @@ class BatchGeneratorPool(multiprocessing.Process):
       self.running_class_count = np.zeros(self.num_classes)
 
       self.control_index = len(csv_q)
-      if csv_mgr is None:
-         csv_mgr = multiprocessing.Manager()
-      csv_q.append(csv_mgr.Queue(maxsize=self.queue_depth))
+      self.logger.info('control index = %s',self.control_index)
+      csv_mgr.append(multiprocessing.Manager())
+      csv_q.append(csv_mgr[self.control_index].Queue(maxsize=self.queue_depth))
+      csv_new_epoch.append(csv_mgr[self.control_index].Event())
+      csv_exit.append(csv_mgr[self.control_index].Event())
 
    def __len__(self):
       return self.total_batches
@@ -44,34 +50,53 @@ class BatchGeneratorPool(multiprocessing.Process):
    def batch_gen(self):
 
       while True:
-         logger.debug('getting batch from queue')
+         self.logger.debug('getting batch from queue')
          data = csv_q[self.control_index].get()
-         logger.debug('queue get returned batch')
+         self.logger.debug('queue get returned batch')
          if data:
             yield data
          else:
+            self.logger.debug('received no message, triggering exit of loop')
             break
+
+      self.logger.debug('batch_gen exit')
+
+   def start_epoch(self):
+      csv_new_epoch[self.control_index].set()
 
    def run(self):
 
-      # create a pool of workers with a subset of files
-      logger.debug('creating pool size %s' % self.pool_size)
-      p = multiprocessing.Pool(self.pool_size)
+      # loop until told to exit
+      while not csv_exit[self.control_index].is_set():
 
-      # split batch indices
-      batch_indices = np.arange(self.total_batches)
-      batch_groups = np.array_split(batch_indices,self.pool_size)
-      logger.debug('batch_groups = %s',len(batch_groups))
-      inputs = tuple([(csv_q[self.control_index],self.batch_size,self.filelist,list(x),self.config_file) for x in batch_groups])
-      logger.debug('inputs = %s',len(inputs))
-      logger.debug('starting processes %s' % (len(batch_groups)))
-      for batch_num,data in enumerate(p.imap_unordered(self.process_batch,inputs)):
-         logger.debug('got batch %s with data sizes: %s',batch_num,data)
+         # wait to continue until new epoch starts
+         csv_new_epoch[self.control_index].wait()
+         csv_new_epoch[self.control_index].clear()
 
-      logger.debug('all processes completed, closing pool')
-      p.close()
-      logger.debug('data reading done.')
-      csv_q.put(None)
+         # shuffle input file list as a proxy for randomizing inputs
+         if self.use_random:
+            np.random.shuffle(self.filelist)
+
+         # create a pool of workers with a subset of files
+         self.logger.debug('creating pool size %s' % self.pool_size)
+         p = multiprocessing.Pool(self.pool_size)
+
+         # split batch indices
+         batch_indices = np.arange(self.total_batches)
+         batch_groups = np.array_split(batch_indices,self.pool_size)
+         self.logger.debug('batch_groups = %s',len(batch_groups))
+         inputs = tuple([(csv_q[self.control_index],self.batch_size,self.filelist,list(x),self.config_file) for x in batch_groups])
+         self.logger.debug('inputs = %s',len(inputs))
+         self.logger.debug('starting processes %s' % (len(batch_groups)))
+         for batch_num,data in enumerate(p.imap_unordered(self.process_batch,inputs)):
+            self.logger.debug('process %s exited having processed batch indices: %s',batch_num,data)
+
+         self.logger.debug('all processes completed, closing pool')
+         p.close()
+         self.logger.debug('data reading done.')
+         csv_q[self.control_index].put(None)
+
+
 
    @staticmethod
    def process_batch(inputs):
@@ -93,14 +118,20 @@ class BatchGeneratorPool(multiprocessing.Process):
          logger.debug('in process_batch looping over batches %s',len(bg))
          for batch in bg.batch_gen():
             logger.debug('in process_batch putting batch on queue: %s',batch)
-            queue.put(batch)
+            try:
+               queue.put(batch)
+            except:
+               logger.exception('exception thrown when placing batch on queue, first file %s',filelist[0])
+               raise
          logger.debug('in process_batch done looping over batches')
 
       return batch_indices
 
 
 class BatchGenerator:
-   def __init__(self,filelist,config_file):
+   def __init__(self,filelist,config_file,log_label=__name__):
+      global logger
+      self.logger = logging.getLogger(log_label)
       self.filelist     = np.array(filelist)
       self.evt_per_file = config_file['data_handling']['evt_per_file']
       self.batch_size   = config_file['training']['batch_size']
@@ -111,8 +142,14 @@ class BatchGenerator:
       self.use_random   = config_file['data_handling']['shuffle']
       self.class_ids    = config_file['data_handling']['class_nums']
 
+      if 'pytorch' in config_file['model']['framework']:
+         from pytorch.model import device
+         self.device    = device
+      else:
+         self.device    = None
+
       self.total_images = self.evt_per_file * len(self.filelist)
-      logger.debug('total images = %s evt_per_file = %s filelist = %s',self.total_images,self.evt_per_file,len(self.filelist))
+      self.logger.debug('total images = %s evt_per_file = %s filelist = %s',self.total_images,self.evt_per_file,len(self.filelist))
       self.total_batches = self.total_images // self.batch_size // self.nranks
       self.batches_per_file = self.evt_per_file // self.batch_size
 
@@ -126,19 +163,22 @@ class BatchGenerator:
    def __len__(self):
       return self.total_batches
 
+   def start_epoch(self):
+      pass
+
    def batch_gen(self):
       if len(self.filelist) == 0:
-         logger.error('filelist is empty')
+         self.logger.error('filelist is empty')
          raise Exception('passed empty filelist')
       if self.use_random:
          np.random.shuffle(self.filelist)
 
       start_file_index = self.rank * self.files_per_rank
       end_file_index = (self.rank + 1) * self.files_per_rank
-      logger.debug(f'filelist indices: {start_file_index} - {end_file_index}')
+      self.logger.debug(f'filelist indices: {start_file_index} - {end_file_index}')
 
-      logger.debug('rank %s processing files %s through %s',self.rank,start_file_index,end_file_index)
-      logger.debug('first file after shuffle: %s',self.filelist[0])
+      self.logger.debug('rank %s processing files %s through %s',self.rank,start_file_index,end_file_index)
+      self.logger.debug('first file after shuffle: %s',self.filelist[0])
       image_counter = 0
       inputs = np.zeros([self.batch_size] + self.img_shape)
       targets = np.zeros([self.batch_size])
@@ -157,13 +197,16 @@ class BatchGenerator:
                inputs = self.normalize_inputs(inputs)
                inputs = torch.from_numpy(inputs).float().permute(0,2,1)
                targets = torch.from_numpy(targets).long()
+               if self.device:
+                  inputs = inputs.to(self.device)
+                  targets = targets.to(self.device)
                yield (inputs,targets)
 
                image_counter = 0
                inputs = np.zeros([self.batch_size] + self.img_shape)
                targets = np.zeros([self.batch_size])
          except ValueError:
-            logger.exception('received exception while processing file %s',filename)
+            self.logger.exception('received exception while processing file %s',filename)
 
    def normalize_inputs(self,inputs):
       # shape: [B,N,4]
@@ -219,6 +262,7 @@ if __name__ == '__main__':
    logging_datefmt = '%Y-%m-%d %H:%M:%S'
    log_level = logging.DEBUG
    logging.basicConfig(level=log_level,format=logging_format,datefmt=logging_datefmt)
+   logger = logging.getLogger(__name__)
    import sys,json,glob,time
    print(sys.argv)
    config_file = json.load(open(sys.argv[1]))

@@ -5,9 +5,13 @@ logger = logging.getLogger(__name__)
 
 def get_filelist(config_file):
    # get file list
+   batch_limiter = config_file['batch_limiter']
    logger.info('train glob dir: %s',config_file['data_handling']['train_glob'])
    logger.info('valid glob dir: %s',config_file['data_handling']['valid_glob'])
    train_filelist = sorted(glob.glob(config_file['data_handling']['train_glob']))
+   if batch_limiter:
+      maxfile = batch_limiter * config_file['training']['batch_size'] / config_file['data_handling']['evt_per_file']
+      train_filelist = train_filelist[0:int(maxfile + 1)]
    valid_filelist = sorted(glob.glob(config_file['data_handling']['valid_glob']))
    logger.info('found %s training files, %s validation files',len(train_filelist),len(valid_filelist))
 
