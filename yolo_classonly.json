@@ -1,0 +1,32 @@
+{
+   "model": {
+      "framework":                     "pytorch",
+      "model":                         "yolo_classonly"
+   },
+   "optimizer": {
+      "name":                          "adam",
+      "lr":                            0.001,
+      "lrsched":                       "StepLR",
+      "lrsched_step_size":             2,
+      "lrsched_gamma":                 0.5
+   },
+   "loss": {
+      "func":                          "pointnet_class_loss"
+
+   },
+   "data_handling": {
+      "input_format":                  "dataset_h5",
+      "train_glob":                    "/Users/jchilders/workdir/ml_data/atlas/h5_data/zee2jets/train/*",
+      "valid_glob":                    "/Users/jchilders/workdir/ml_data/atlas/h5_data/zee2jets/valid/*",
+      "images_per_file":               100,
+      "image_shape":                   [16, 256, 5761],
+      "shuffle":                       true,
+      "classes":                       ["jet","electron"],
+      "workers":                       2
+   },
+   "training": {
+      "batch_size":                    10,
+      "epochs":                        100,
+      "steps_per_valid":               100
+   }
+}

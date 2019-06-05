@@ -121,27 +121,10 @@ def main():
 
    logger.info('configuration = \n%s',json.dumps(config_file, indent=4, sort_keys=True))
 
-   logger.info('getting filelists')
-   trainlist,validlist = datautils.get_filelist(config_file)
-
-   if 'csv' == config_file['data_handling']['input_format']:
-      logger.info('using CSV data handler')
-      from data_handlers.csv_format import BatchGenerator
-      logger.info('creating batch generators')
-      trainds = BatchGenerator(trainlist,config_file,'BatchGen:train')
-      validds = BatchGenerator(validlist,config_file,'BatchGen:valid')
-
-   elif 'csv_pool' == config_file['data_handling']['input_format']:
-      logger.info('using CSV pool data handler')
-      from data_handlers.csv_format import BatchGeneratorPool
-      logger.info('creating batch generators')
-      trainds = BatchGeneratorPool(trainlist,config_file,'BatchGenPool:train')
-      trainds.start()
-      validds = BatchGeneratorPool(validlist,config_file,'BatchGenPool:valid')
-      validds.start()
-   else:
-      raise Exception('no input file format specified in configuration')
+   # get datasets for training and validation
+   trainds,validds = datautils.get_datasets(config_file)
    
+   # setup tensorboard
    writer = None
    if args.logdir:
       writer = tensorboardX.SummaryWriter(log_dir=args.logdir)
@@ -151,21 +134,26 @@ def main():
       from pytorch import model,loss
 
       net = model.get_model(config_file)
+      if hasattr(trainds,'dataset') and hasattr(net,'output_grid'):
+         trainds.dataset.grid_size = net.output_grid
+
+      if hasattr(validds,'dataset') and hasattr(net,'output_grid'):
+         validds.dataset.grid_size = net.output_grid
 
       opt,lrsched = model.setup(net,hvd,config_file)
 
-      lossfunc = loss.get_loss(config_file)
-      accfunc = loss.get_accuracy(config_file)
+      #lossfunc = loss.get_loss(config_file)
+      #accfunc = loss.get_accuracy(config_file)
 
       logger.info('model = \n %s',net)
 
-      #total_params = sum(p.numel() for p in model.parameters())
-      #logger.info('trainable parameters: %s',total_params)
+      total_params = sum(p.numel() for p in net.parameters())
+      logger.info('trainable parameters: %s',total_params)
 
       if args.valid_only:
          model.valid_model(net,validds,config_file)
       else:
-         model.train_model(net,opt,lossfunc,accfunc,lrsched,trainds,validds,config_file,writer)
+         net.train_model(opt,lrsched,trainds,validds,config_file,writer)
             
 
 def print_module(module,input_shape,input_channels,name=None,indent=0):

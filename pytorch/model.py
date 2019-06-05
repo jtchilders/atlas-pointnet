@@ -1,4 +1,3 @@
-import pytorch.pointnet as pointnet
 import pytorch.optimizer as opt
 import numpy as np
 from sklearn.metrics import confusion_matrix
@@ -27,6 +26,7 @@ def get_model(config):
       nCoords = input_shape[1]
       nClasses = len(config['data_handling']['classes'])
       logger.debug('nChannels = %s, nPoints = %s, nCoords = %s, nClasses = %s',nChannels,nPoints,nCoords,nClasses)
+      import pytorch.pointnet as pointnet
       model = pointnet.PointNet2d(nChannels,nPoints,nCoords,nClasses)
       model.to(device)
       return model
@@ -40,7 +40,18 @@ def get_model(config):
       nCoords = input_shape[1]
       nClasses = len(config['data_handling']['classes'])
       logger.debug('nPoints = %s, nCoords = %s, nClasses = %s',nPoints,nCoords,nClasses)
+      import pytorch.pointnet as pointnet
       model = pointnet.PointNet1d(nPoints,nCoords,nClasses)
+      model.to(device)
+      return model
+   elif 'yolo_classonly' in config['model']['model']:
+      logger.info('using yolo_classonly model')
+      input_shape = config['data_handling']['image_shape']
+
+      assert(len(input_shape) == 3)
+
+      import pytorch.yolo_classonly as yolo
+      model = yolo.YOLOClassOnly(config)
       model.to(device)
       return model
    else:
@@ -78,8 +89,15 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
    nsave = config['nsave']
    model_save = config['model_save']
 
-   validds_itr = validds.batch_gen()
-   validds.start_epoch()
+   # some data handlers need a restart
+   if callable(getattr(validds,'start_epoch',None)):
+      validds.start_epoch()
+
+   # get data iterator for validation
+   if callable(getattr(validds,'batch_gen',None)):
+      validds_itr = validds.batch_gen
+   else:
+      validds_itr = validds
 
    data_time = CalcMean.CalcMean()
    move_time = CalcMean.CalcMean()
@@ -95,8 +113,16 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
    for epoch in range(epochs):
       logger.info(' epoch %s of %s',epoch,epochs)
 
-      trainds.start_epoch()
-      
+      # some data handlers need a restart
+      if callable(getattr(trainds,'start_epoch',None)):
+         trainds.start_epoch()
+
+      # get data iterator
+      if callable(getattr(trainds,'batch_gen',None)):
+         train_itr = trainds.batch_gen
+      else:
+         train_itr = trainds
+
       if lrsched:
          lrsched.step()
 
@@ -109,7 +135,7 @@ def train_model(net,opt,loss,acc,lrsched,trainds,validds,config,writer=None):
       net.to(device)
       batch_counter = 0
       start_data = time.time()
-      for batch_data in trainds.batch_gen():
+      for batch_data in train_itr:
          end_data = time.time()
          
          # logger.debug('got training batch %s',batch_counter)
