@@ -2,6 +2,7 @@ from torch.utils import data as td
 import torch
 import h5py,logging
 import numpy as np
+from pytorch.model import device
 logger = logging.getLogger(__name__)
 
 class ImageDataset(td.Dataset):
@@ -32,7 +33,14 @@ class ImageDataset(td.Dataset):
       image = np.float32(file['raw'][image_index])
       truth = np.int32(file['truth'][image_index])
       truth = self.convert_truth_classonly(truth,self.image_shape[1],self.image_shape[2])
-      return torch.from_numpy(image),torch.from_numpy(truth)
+      
+      image = torch.from_numpy(image)
+      truth = torch.from_numpy(truth)
+
+      image = image.to(device)
+      truth = truth.to(device)
+
+      return image,truth
 
    def convert_truth_classonly(self,truth,img_height,img_width):
 
