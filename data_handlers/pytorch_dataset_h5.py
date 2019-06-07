@@ -37,8 +37,8 @@ class ImageDataset(td.Dataset):
       image = torch.from_numpy(image)
       truth = torch.from_numpy(truth)
 
-      image = image.to(device)
-      truth = truth.to(device)
+      # image = image.to(device)
+      # truth = truth.to(device)
 
       return image,truth
 

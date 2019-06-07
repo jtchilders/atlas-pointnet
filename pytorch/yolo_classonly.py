@@ -141,9 +141,9 @@ class YOLOClassOnly(torch.nn.Module):
             
             # logger.debug('got training batch %s',batch_counter)
             start_move = end_data
-            inputs = batch_data[0]
+            inputs = batch_data[0].to(device)
             #inputs = inputs.to(device)
-            targets = batch_data[1]
+            targets = batch_data[1].to(device)
             #targets = targets.to(device)
             end_move = time.time()
 
