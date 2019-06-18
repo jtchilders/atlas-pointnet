@@ -32,16 +32,9 @@ def get_model(config):
       return model
    elif 'pointnet1d' in config['model']['model']:
       logger.info('using pointnet model')
-      input_shape = config['data_handling']['image_shape']
-
-      assert(len(input_shape) == 2)
-
-      nPoints = input_shape[0]
-      nCoords = input_shape[1]
-      nClasses = len(config['data_handling']['classes'])
-      logger.debug('nPoints = %s, nCoords = %s, nClasses = %s',nPoints,nCoords,nClasses)
+      
       import pytorch.pointnet as pointnet
-      model = pointnet.PointNet1d(nPoints,nCoords,nClasses)
+      model = pointnet.PointNet1d(config)
       model.to(device)
       return model
    elif 'yolo_classonly' in config['model']['model']:

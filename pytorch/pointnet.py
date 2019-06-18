@@ -1,7 +1,9 @@
 import torch
 import pytorch.utils as utils
 import logging,time
+from sklearn.metrics import confusion_matrix
 import CalcMean
+import numpy as np
 from pytorch.model import device
 logger = logging.getLogger(__name__)
 
@@ -113,29 +115,44 @@ class Transform2d(torch.nn.Module):
 
 
 class PointNet1d(torch.nn.Module):
-   def __init__(self,nPoints,nCoords,nClasses):
+   def __init__(self,config):
       super(PointNet1d,self).__init__()
+
+      input_shape = config['data_handling']['image_shape']
+
+      assert(len(input_shape) == 2)
+
+      nPoints = input_shape[0]
+      nCoords = input_shape[1]
+      nClasses = len(config['data_handling']['classes'])
+      
+      logger.debug('nPoints = %s, nCoords = %s, nClasses = %s',nPoints,nCoords,nClasses)
 
       self.input_trans = Transform1d(nPoints,nCoords)
       
-      self.conv64A = utils.Conv1d(nCoords,64,pool=False)
-      self.conv64B = utils.Conv1d(64,64,pool=False)
+      self.input_to_feature = torch.nn.Sequential()
+      for x in config['model']['input_to_feature']:
+         N_in,N_out,pool = x
+         self.input_to_feature.add_module(f'conv_{N_in}_to_{N_out}',utils.Conv1d(N_in,N_out,pool=pool))
+         #utils.Conv1d(nCoords,64,pool=False)
+         #utils.Conv1d(64,64,pool=False))
       
       self.feature_trans = Transform1d(nPoints,64)
       
-      self.conv64C = utils.Conv1d(64,64,pool=False)
-      self.conv128  = utils.Conv1d(64,128,pool=False)
-      self.conv1024 = utils.Conv1d(128,1024,pool=False)
-      
+      self.feature_to_pool = torch.nn.Sequential()
+      for x in config['model']['feature_to_pool']:
+         N_in,N_out,pool = x
+         self.feature_to_pool.add_module(f'conv_{N_in}_to_{N_out}',utils.Conv1d(N_in,N_out,pool=pool))
+         
       self.pool = torch.nn.MaxPool1d(nPoints)
-      
-      self.linear512 = utils.Linear(1024,512)
-      self.dropoutA = torch.nn.Dropout(0.7)
-      
-      self.linear256 = utils.Linear(512,256)
-      self.dropoutB = torch.nn.Dropout(0.7)
-   
-      self.linearID = utils.Linear(256,nClasses,bn=False,activation=None)
+
+      self.dense_layers = torch.nn.Sequential()
+      for x in config['model']['dense_layers']:
+         N_in,N_out,dropout,bn,act = x
+         dr = int(dropout * 3)
+         self.dense_layers.add_module(f'dense_{N_in}_to_{N_out}',utils.Linear(N_in,N_out,bn=bn,activation=act))
+         if dropout > 0:
+            self.dense_layers.add_module(f'dropout_{dr:03d}',torch.nn.Dropout(dropout))
       
    def forward(self,x):
       batch_size = x.shape[0]
@@ -147,10 +164,7 @@ class PointNet1d(torch.nn.Module):
       x = torch.bmm(it,x)
       # print('pointnet1d it*x: %s' % x[0,:l,:l])
       
-      x = self.conv64A(x)
-      # print('pointnet1d conv64A: %s' % x[0,:l,:l])
-      x = self.conv64B(x)
-      # print('pointnet1d conv64B: %s' % x[0,:l,:l])
+      x = self.input_to_feature(x)
       
       ft = self.feature_trans(x)
       # print('pointnet1d feature_trans: %s' % ft[0,:10,:10])
@@ -158,12 +172,7 @@ class PointNet1d(torch.nn.Module):
       x = torch.bmm(ft,x)
       # print('pointnet1d ft*x: %s' % x[0,:l,:l])
       
-      x = self.conv64C(x)
-      # print('pointnet1d conv64C: %s' % x[0,:l,:l])
-      x = self.conv128(x)
-      # print('pointnet1d conv128: %s' % x[0,:l,:l])
-      x = self.conv1024(x)
-      # print('pointnet1d conv1024: %s' % x[0,:l,:l])
+      x = self.feature_to_pool(x)
       
       x = self.pool(x)
       # print('pointnet1d pool: %s' % x[0,:l,:])
@@ -171,18 +180,7 @@ class PointNet1d(torch.nn.Module):
       x = x.reshape([batch_size,-1])
       # print('pointnet1d reshape: %s' % x[0,:l])
       
-      x = self.linear512(x)
-      # print('pointnet1d linear512: %s' % x[0,:l])
-      x = self.dropoutA(x)
-      # print('pointnet1d dropoutA: %s' % x[0,:l])
-      
-      x = self.linear256(x)
-      # print('pointnet1d linear256: %s' % x[0,:l])
-      x = self.dropoutB(x)
-      # print('pointnet1d dropoutB: %s' % x[0,:l])
-      
-      x = self.linearID(x)
-      # print('pointnet1d linearID: %s' % x)
+      x = self.dense_layers(x)
       
       return x,endpoints
 
@@ -202,7 +200,8 @@ class PointNet1d(torch.nn.Module):
 
       # get data iterator for validation
       if callable(getattr(validds,'batch_gen',None)):
-         validds_itr = validds.batch_gen
+         logger.info('using batch_gen method for valid')
+         validds_itr = iter(validds.batch_gen())
       else:
          validds_itr = validds
 
@@ -229,9 +228,10 @@ class PointNet1d(torch.nn.Module):
 
          # get data iterator
          if callable(getattr(trainds,'batch_gen',None)):
-            train_itr = trainds.batch_gen
+            logger.info('using batch_gen method for train')
+            trainds_itr = iter(trainds.batch_gen())
          else:
-            train_itr = trainds
+            trainds_itr = trainds
 
          if lrsched:
             lrsched.step()
@@ -244,15 +244,15 @@ class PointNet1d(torch.nn.Module):
          self.train()
          batch_counter = 0
          start_data = time.time()
-         for batch_data in train_itr:
+         for batch_data in trainds_itr:
             end_data = time.time()
             
             # logger.debug('got training batch %s',batch_counter)
             start_move = end_data
             inputs = batch_data[0]
-            #inputs = inputs.to(device)
+            inputs = inputs.to(device)
             targets = batch_data[1]
-            #targets = targets.to(device)
+            targets = targets.to(device)
             end_move = time.time()
 
             # logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
@@ -310,45 +310,47 @@ class PointNet1d(torch.nn.Module):
 
                if batch_counter % nval == 0 or batch_counter == len(trainds):
                   #logger.info('running validation')
-                  net.eval()
+                  self.eval()
 
                   # if validds.reached_end:
                   #    logger.warning('restarting validation file pool.')
                   #    validds.start_file_pool(1)
 
-                  for _ in range(nval_tests):
+                  vloss = CalcMean.CalcMean()
+                  vacc = CalcMean.CalcMean()
 
-                     try:
-                        batch_data = next(validds_itr)
-                        valid_batch_counter += 1
-                     except StopIteration:
-                        validds.start_epoch()
-                        validds_itr = validds.batch_gen()
-                        batch_data = next(validds_itr)
-                        valid_batch_counter = 0
+                  valid_batch_counter = 0
+                  for batch_data in validds_itr:
+
+                     valid_batch_counter += 1
                      
-                     inputs = batch_data[0]  # .to(device)
-                     targets = batch_data[1]  # .to(device)
+                     inputs = batch_data[0].to(device)
+                     targets = batch_data[1].to(device)
 
                      # logger.debug('valid inputs: %s targets: %s',inputs.shape,targets.shape)
 
-                     outputs,endpoints = net(inputs)
+                     outputs,endpoints = self(inputs)
                      #true_positive_accuracy,true_or_false_positive_accuracy,filled_grids_accuracy = accuracyCalc.eval_acc(outputs,targets,inputs)
 
                      loss_value = loss(outputs,targets,endpoints,device=device)
+                     vloss.add_value(loss_value.item())
                      acc_value = acc(outputs,targets)
+                     vacc.add_value(acc_value.item())
 
                      if writer:
                         global_batch = epoch * len(trainds) + batch_counter
                         writer.add_scalars('loss',{'valid':loss_value.item()},global_batch)
                         writer.add_scalars('accuracy',{'valid':acc_value.item()},global_batch)
 
-                     logger.info('>[%3d of %3d, %5d of %5d]< valid loss: %6.4f valid acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds),loss_value.item(),acc_value.item())
+                     if valid_batch_counter > nval_tests:
+                        break
                      
-                  net.train()
+                  logger.info('>[%3d of %3d, %5d of %5d]<<< valid loss: %6.4f valid acc: %6.4f >>>',epoch + 1,epochs,batch_counter,len(trainds),vloss.calc_mean(),vacc.calc_mean())
+
+                  self.train()
 
                if batch_counter % nsave == 0:
-                  torch.save(net.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
+                  torch.save(self.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
 
             start_data = time.time()
 
@@ -363,8 +365,8 @@ class PointNet1d(torch.nn.Module):
       backward_time = CalcMean.CalcMean()
       batch_time = CalcMean.CalcMean()
 
-      net.eval()
-      net.to(device)
+      self.eval()
+      self.to(device)
       batch_counter = 0
       start_data = time.time()
 
@@ -381,7 +383,7 @@ class PointNet1d(torch.nn.Module):
          start_forward = time.time()
 
          logger.debug('zeroed opt')
-         outputs,endpoints = net(inputs)
+         outputs,endpoints = self(inputs)
          logger.debug('got outputs: %s targets: %s',outputs,targets)
 
          # logger.info('>> pred = %s targets = %s',pred,targets)
@@ -521,7 +523,7 @@ class Transform1d(torch.nn.Module):
       self.linear512 = utils.Linear(1024,512)
       self.linear256 = utils.Linear(512,256)
 
-      self.linearK = torch.nn.Linear(256,width*width)
+      self.linearK = torch.nn.Linear(256,width * width)
       self.linearK.bias = torch.nn.Parameter(torch.eye(width).view(width * width))
 
       #self.weights = torch.zeros(256,width * width,requires_grad=True)
@@ -545,6 +547,3 @@ class Transform1d(torch.nn.Module):
       x = x.reshape([batch_size,self.width,self.width])
       
       return x
-
-
-
