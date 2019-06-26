@@ -47,7 +47,7 @@ def get_datasets(config_file):
       validdss = CSVDataset(validlist,config_file)
       validds = CSVDataset.get_loader(validdss,batch_size=config_file['training']['batch_size'],
                                       shuffle=config_file['data_handling']['shuffle'],
-                                      num_workers=config_file['data_handling']['workers'])
+                                      num_workers=1)
 
    elif 'csv_pool' == config_file['data_handling']['input_format']:
       logger.info('using CSV pool data handler')
