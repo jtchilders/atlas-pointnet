@@ -137,7 +137,7 @@ class PointNet1d(torch.nn.Module):
          #utils.Conv1d(nCoords,64,pool=False)
          #utils.Conv1d(64,64,pool=False))
       
-      self.feature_trans = Transform1d(nPoints,64)
+      self.feature_trans = Transform1d(nPoints,config['model']['input_to_feature'][-1][1])
       
       self.feature_to_pool = torch.nn.Sequential()
       for x in config['model']['feature_to_pool']:
@@ -373,8 +373,19 @@ class PointNet1d(torch.nn.Module):
       start_data = time.time()
 
       confmat = np.zeros((nClasses,nClasses))
+      
+      # some data handlers need a restart
+      if callable(getattr(validds,'start_epoch',None)):
+         validds.start_epoch()
 
-      for batch_data in validds.batch_gen():
+      # get data iterator for validation
+      if callable(getattr(validds,'batch_gen',None)):
+         logger.info('using batch_gen method for valid')
+         validds_itr = iter(validds.batch_gen())
+      else:
+         validds_itr = validds
+
+      for batch_data in validds_itr:
          logger.debug('got validation batch %s',batch_counter)
          
          inputs = batch_data[0].to(device)
