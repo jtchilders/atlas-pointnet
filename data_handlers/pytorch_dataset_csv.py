@@ -1,6 +1,7 @@
 from torch.utils import data as td
 import logging,pandas as pd
 import numpy as np
+import CalcMean
 logger = logging.getLogger(__name__)
 
 
@@ -30,7 +31,12 @@ class CSVDataset(td.Dataset):
 
    def get_input(self):
       if hasattr(self,'data'):
-         input = self.data[['eta','phi','r','Et']]
+         if 'silicon_only' in self.config['data_handling'] and self.config['data_handling']['silicon_only']:
+            input = self.data[self.data['id'] < 4e17]
+            input = input[['eta','phi','r','Et']]
+         else:
+            input = self.data[['eta','phi','r','Et']]
+         
          input = np.tile(input,(int(self.img_shape[0] / input.shape[0]) + 1,1))[:self.img_shape[0],...]
          input = input.transpose()
          return input
