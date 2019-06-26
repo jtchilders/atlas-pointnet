@@ -290,6 +290,8 @@ class PointNet1d(torch.nn.Module):
 
             batch_counter += 1
 
+            del inputs,targets
+
             # print statistics
             if config['rank'] == 0:
                if batch_counter % status == 0:
