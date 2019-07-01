@@ -127,7 +127,7 @@ def main():
    # setup tensorboard
    writer = None
    if args.logdir:
-      writer = tensorboardX.SummaryWriter(log_dir=args.logdir)
+      writer = tensorboardX.SummaryWriter(args.logdir)
    
    logger.info('building model')
    if 'pytorch' in config_file['model']['framework']:
