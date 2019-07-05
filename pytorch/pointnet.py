@@ -193,6 +193,8 @@ class PointNet1d(torch.nn.Module):
       nval_tests = config['nval_tests']
       nsave = config['nsave']
       model_save = config['model_save']
+      rank = config['rank']
+      hvd = config['hvd']
 
       # some data handlers need a restart
       if callable(getattr(validds,'start_epoch',None)):
@@ -293,7 +295,7 @@ class PointNet1d(torch.nn.Module):
             del inputs,targets
 
             # print statistics
-            if config['rank'] == 0:
+            if rank == 0:
                if batch_counter % status == 0:
                   mean_img_per_second = (forward_time.calc_mean() + backward_time.calc_mean()) / batch_size
                   mean_img_per_second = 1. / mean_img_per_second
@@ -309,7 +311,8 @@ class PointNet1d(torch.nn.Module):
                      writer.add_scalar('image_per_second',mean_img_per_second,global_batch)
 
                   monitor_loss = CalcMean.CalcMean()
-
+               
+               
                if batch_counter % nval == 0 or batch_counter == len(trainds):
                   #logger.info('running validation')
                   self.eval()
@@ -339,7 +342,7 @@ class PointNet1d(torch.nn.Module):
                      acc_value = acc(outputs,targets)
                      vacc.add_value(acc_value.item())
 
-                     if writer:
+                     if writer and rank == 0:
                         global_batch = epoch * len(trainds) + batch_counter
                         writer.add_scalars('loss',{'valid':loss_value.item()},global_batch)
                         writer.add_scalars('accuracy',{'valid':acc_value.item()},global_batch)
@@ -353,7 +356,14 @@ class PointNet1d(torch.nn.Module):
 
                if batch_counter % nsave == 0:
                   torch.save(self.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
-
+               
+               # meet all other waiting ranks
+               if hvd is not None:
+                  hvd.allreduce(torch.FloatTensor(0),name='barrier')
+            elif hvd is not None:
+               # wait for rank 0 to finish running validation
+               hvd.allreduce(torch.FloatTensor(0),name='barrier')
+            
             start_data = time.time()
 
    def valid_model(self,validds,config):

@@ -120,13 +120,14 @@ def main():
       config_file['training']['epochs'] = args.epochs
 
    logger.info('configuration = \n%s',json.dumps(config_file, indent=4, sort_keys=True))
+   config_file['hvd'] = hvd
 
    # get datasets for training and validation
    trainds,validds = datautils.get_datasets(config_file)
    
    # setup tensorboard
    writer = None
-   if args.logdir:
+   if args.logdir and rank == 0:
       writer = tensorboardX.SummaryWriter(args.logdir)
    
    logger.info('building model')
