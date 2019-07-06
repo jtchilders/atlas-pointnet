@@ -196,6 +196,10 @@ class PointNet1d(torch.nn.Module):
       rank = config['rank']
       hvd = config['hvd']
 
+      batch_limiter = None
+      if 'batch_limiter' in config:
+         batch_limiter = config['batch_limiter']
+
       # some data handlers need a restart
       if callable(getattr(validds,'start_epoch',None)):
          validds.start_epoch()
@@ -219,6 +223,7 @@ class PointNet1d(torch.nn.Module):
       acc_time = CalcMean.CalcMean()
 
       monitor_loss = CalcMean.CalcMean()
+      monitor_acc = CalcMean.CalcMean()
 
       valid_batch_counter = 0
       for epoch in range(epochs):
@@ -244,16 +249,13 @@ class PointNet1d(torch.nn.Module):
                writer.add_scalar('learning_rate',param_group['lr'],epoch)
 
          self.train()
-         batch_counter = 0
          start_data = time.time()
-         for batch_data in trainds_itr:
+         for batch_counter,(inputs,targets) in enumerate(trainds_itr):
             end_data = time.time()
             
             # logger.debug('got training batch %s',batch_counter)
             start_move = end_data
-            inputs = batch_data[0]
             inputs = inputs.to(device)
-            targets = batch_data[1]
             targets = targets.to(device)
             end_move = time.time()
 
@@ -274,6 +276,7 @@ class PointNet1d(torch.nn.Module):
 
             start_acc = time.time()
             acc_value = acc(outputs,targets)
+            monitor_acc.add_value(acc_value)
             end_acc = time.time()
 
             start_backward = end_acc
@@ -295,76 +298,72 @@ class PointNet1d(torch.nn.Module):
             del inputs,targets
 
             # print statistics
-            if rank == 0:
-               if batch_counter % status == 0:
-                  mean_img_per_second = (forward_time.calc_mean() + backward_time.calc_mean()) / batch_size
-                  mean_img_per_second = 1. / mean_img_per_second
-                  
-                  logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f move time: %6.3f forward time: %6.3f loss time: %6.3f  backward time: %6.3f acc time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),acc_value.item(),mean_img_per_second,data_time.calc_mean(),move_time.calc_mean(),forward_time.calc_mean(),acc_time.calc_mean(),backward_time.calc_mean(),acc_time.calc_mean(),batch_time.calc_mean())
-                  # logger.info('running count = %s',trainds.running_class_count)
-                  # logger.info('prediction = %s',torch.nn.Softmax(dim=1)(outputs))
-
-                  if writer:
-                     global_batch = epoch * len(trainds) + batch_counter
-                     writer.add_scalars('loss',{'train':monitor_loss.calc_mean()},global_batch)
-                     writer.add_scalars('accuracy',{'train':acc_value.item()},global_batch)
-                     writer.add_scalar('image_per_second',mean_img_per_second,global_batch)
-
-                  monitor_loss = CalcMean.CalcMean()
+            if batch_counter % status == 0:
+               mean_img_per_second = (forward_time.calc_mean() + backward_time.calc_mean()) / batch_size
+               mean_img_per_second = 1. / mean_img_per_second
                
-               
-               if batch_counter % nval == 0 or batch_counter == len(trainds):
-                  #logger.info('running validation')
-                  self.eval()
+               logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f move time: %6.3f forward time: %6.3f loss time: %6.3f  backward time: %6.3f acc time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),monitor_acc.calc_mean(),mean_img_per_second,data_time.calc_mean(),move_time.calc_mean(),forward_time.calc_mean(),acc_time.calc_mean(),backward_time.calc_mean(),acc_time.calc_mean(),batch_time.calc_mean())
+               # logger.info('running count = %s',trainds.running_class_count)
+               # logger.info('prediction = %s',torch.nn.Softmax(dim=1)(outputs))
 
-                  # if validds.reached_end:
-                  #    logger.warning('restarting validation file pool.')
-                  #    validds.start_file_pool(1)
+               if writer and rank == 0:
+                  global_batch = epoch * len(trainds) + batch_counter
+                  writer.add_scalars('loss',{'train':monitor_loss.calc_mean()},global_batch)
+                  writer.add_scalars('accuracy',{'train':acc_value.item()},global_batch)
+                  writer.add_scalar('image_per_second',mean_img_per_second,global_batch)
 
-                  vloss = CalcMean.CalcMean()
-                  vacc = CalcMean.CalcMean()
+               monitor_loss = CalcMean.CalcMean()
+               monitor_acc = CalcMean.CalcMean()
 
-                  valid_batch_counter = 0
-                  for batch_data in validds_itr:
-
-                     valid_batch_counter += 1
-                     
-                     inputs = batch_data[0].to(device)
-                     targets = batch_data[1].to(device)
-
-                     # logger.debug('valid inputs: %s targets: %s',inputs.shape,targets.shape)
-
-                     outputs,endpoints = self(inputs)
-                     #true_positive_accuracy,true_or_false_positive_accuracy,filled_grids_accuracy = accuracyCalc.eval_acc(outputs,targets,inputs)
-
-                     loss_value = loss(outputs,targets,endpoints,device=device)
-                     vloss.add_value(loss_value.item())
-                     acc_value = acc(outputs,targets)
-                     vacc.add_value(acc_value.item())
-
-                     if writer and rank == 0:
-                        global_batch = epoch * len(trainds) + batch_counter
-                        writer.add_scalars('loss',{'valid':loss_value.item()},global_batch)
-                        writer.add_scalars('accuracy',{'valid':acc_value.item()},global_batch)
-
-                     if valid_batch_counter > nval_tests:
-                        break
-                     
-                  logger.info('>[%3d of %3d, %5d of %5d]<<< valid loss: %6.4f valid acc: %6.4f >>>',epoch + 1,epochs,batch_counter,len(trainds),vloss.calc_mean(),vacc.calc_mean())
-
-                  self.train()
-
-               if batch_counter % nsave == 0:
-                  torch.save(self.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
-               
-               # meet all other waiting ranks
-               if hvd is not None:
-                  hvd.allreduce(torch.FloatTensor(0),name='barrier')
-            elif hvd is not None:
-               # wait for rank 0 to finish running validation
-               hvd.allreduce(torch.FloatTensor(0),name='barrier')
+            # periodically save the model
+            if batch_counter % nsave == 0 and rank == 0:
+               torch.save(self.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
             
+            # restart data timer 
             start_data = time.time()
+
+            # end training loop, check if should exit
+            if batch_limiter is not None and batch_counter > batch_limiter: break
+         
+         # if this is set, skip validation
+         if batch_limiter is not None: break
+
+         # every epoch, evaluate validation data set
+         self.eval()
+
+         # if validds.reached_end:
+         #    logger.warning('restarting validation file pool.')
+         #    validds.start_file_pool(1)
+
+         vloss = CalcMean.CalcMean()
+         vacc = CalcMean.CalcMean()
+
+         for valid_batch_counter,(inputs,targets) in enumerate(validds_itr):
+
+            inputs = inputs.to(device)
+            targets = targets.to(device)
+
+            outputs,endpoints = self(inputs)
+
+            loss_value = loss(outputs,targets,endpoints,device=device)
+            vloss.add_value(loss_value.item())
+            acc_value = acc(outputs,targets)
+            vacc.add_value(acc_value.item())
+
+         if writer and rank == 0:
+            global_batch = epoch * len(trainds) + batch_counter
+            writer.add_scalars('loss',{'valid':loss_value.item()},global_batch)
+            writer.add_scalars('accuracy',{'valid':acc_value.item()},global_batch)
+
+         if valid_batch_counter > nval_tests:
+            break
+            
+         logger.info('>[%3d of %3d, %5d of %5d]<<< valid loss: %6.4f valid acc: %6.4f >>>',epoch + 1,epochs,batch_counter,len(trainds),vloss.calc_mean(),vacc.calc_mean())
+
+         self.train()
+
+         
+            
 
    def valid_model(self,validds,config):
 
