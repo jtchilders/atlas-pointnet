@@ -1,36 +1,38 @@
 {
    "model": {
       "framework":                     "pytorch",
-      "model":                         "pointnet1d"
+      "model":                         "pointnet1d",
+      "input_to_feature":              [[4,64,false],[64,64,false]],
+      "feature_to_pool":               [[64,64,false],[64,128,false],[128,1024,false]],
+      "dense_layers":                  [[1024,512,0.7,true,"relu"],[512,256,0.7,true,"relu"],[256,2,0,false,null]]
    },
    "optimizer": {
       "name":                          "adam",
       "lr":                            0.001,
       "lrsched":                       "StepLR",
-      "lrsched_step_size":             2,
-      "lrsched_gamma":                 0.5
+      "lrsched_step_size":             400,
+      "lrsched_gamma":                 0.75
    },
    "loss": {
       "func":                          "pointnet_class_loss"
-
    },
    "data_handling": {
       "input_format":                  "dataset_csv",
-      "train_glob":                    "/Users/jchilders/workdir/ml_data/atlas/csv_data/100GEV_0ETA_0PHI/train/*",
-      "valid_glob":                    "/Users/jchilders/workdir/ml_data/atlas/csv_data/100GEV_0ETA_0PHI/valid/*",
+      "glob":                          "/projects/atlasMLbjets/parton/csv_data/100GEV_0ETA_0PHI/?jet/*0l_1j.csv",
+      "train_fraction":                0.9,
       "evt_per_file":                  1,
-      "image_shape":                   [1500,4],
+      "image_shape":                   [1400,4],
       "shuffle":                       true,
-      "classes":                       ["l-jet","c-jet","b-jet","electron","muon"],
-      "class_nums":                    [0,4,5,11,13],
-      "pool_size":                     2,
-      "queue_depth":                   20,
-      "block_size":                    40,
-      "workers":                       0
+      "classes":                       ["l-jet","b-jet"],
+      "class_nums":                    [0,5],
+      "workers":                       0,
+      "pool_size":                     5,
+      "treat_cjet_as_ljet":            true,
+      "queue_depth":                   20
    },
    "training": {
-      "batch_size":                    20,
-      "epochs":                        100,
+      "batch_size":                    100,
+      "epochs":                        1,
       "steps_per_valid":               100
    }
 }
