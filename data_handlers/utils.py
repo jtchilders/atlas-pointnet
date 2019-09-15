@@ -1,8 +1,18 @@
 import logging,glob
+import numpy as np
 logger = logging.getLogger(__name__)
 
 
 def get_filelist(config_file):
+   if 'train_glob' in config_file['data_handling'] and 'valid_glob' in config_file['data_handling']:
+      return get_filelistA(config_file)
+   elif 'glob' in config_file['data_handling']:
+      return get_filelistB(config_file)
+   else:
+      raise Exception('must define "glob" or  "train_glob" AND "valid_glob" in the "data_handing" section of json config file')
+
+
+def get_filelistA(config_file):
    # get file list
    batch_limiter = None
    if 'batch_limiter' in config_file:
@@ -24,10 +34,62 @@ def get_filelist(config_file):
    return train_filelist,valid_filelist
 
 
+def get_filelistB(config_file):
+
+   # get glob string
+   glob_str = config_file['data_handling']['glob']
+
+   # glob for full filelist
+   full_filelist = sorted(glob.glob(glob_str))
+   # randomly shuffle the list a few times
+   np.random.shuffle(full_filelist)
+   np.random.shuffle(full_filelist)
+   np.random.shuffle(full_filelist)
+   np.random.shuffle(full_filelist)
+
+   nfiles = len(full_filelist)
+
+   if 'train_fraction' not in config_file['data_handling']:
+      raise Exception('when using the "glob" setting, you must also specify the fraction of the total files to use for training by setting the "train_fraction" setting, the remaining will be used for validation.')
+
+   # get training fraction
+   trainfrac = config_file['data_handling']['train_fraction']
+   # calculate number of files to use for training
+   ntrain = int(nfiles * trainfrac)
+
+   train_filelist = full_filelist[:ntrain]
+   valid_filelist = full_filelist[ntrain:]
+   logger.info('found %s training files, %s validation files',len(train_filelist),len(valid_filelist))
+   
+   if len(train_filelist) < 1 or len(valid_filelist) < 1:
+      raise Exception('length of file list needs to be at least 1 for train (%s) and val (%s) samples',len(train_filelist),len(valid_filelist))
+
+   logger.warning('first file: %s',train_filelist[0])
+   
+   return train_filelist,valid_filelist
+
+
+def get_shard(config_file,filelist):
+   rank = config_file['rank']
+   nranks = config_file['nranks']
+
+   # calc files per shard
+   files_per_rank = len(filelist) // nranks
+   # starting file
+   start = rank * files_per_rank
+   end   = (rank + 1) * files_per_rank
+
+   return filelist[start:end]
+
+
 def get_datasets(config_file):
 
    logger.info('getting filelists')
    trainlist,validlist = get_filelist(config_file)
+
+   hvd = config_file['hvd']
+   rank = config_file['rank']
+   nranks = config_file['nranks']
 
    if 'csv' == config_file['data_handling']['input_format']:
       logger.info('using CSV data handler')
@@ -41,13 +103,20 @@ def get_datasets(config_file):
       from data_handlers.pytorch_dataset_csv import CSVDataset
       logger.info('creating batch generators')
       traindss = CSVDataset(trainlist,config_file)
+      train_sampler = None
+      train_shuffle = config_file['data_handling']['shuffle']
+      if hvd is not None:
+         import torch
+         train_sampler = torch.utils.data.distributed.DistributedSampler(traindss,num_replicas=nranks,rank=rank)
+         train_shuffle = False
       trainds = CSVDataset.get_loader(traindss,batch_size=config_file['training']['batch_size'],
-                                      shuffle=config_file['data_handling']['shuffle'],
-                                      num_workers=config_file['data_handling']['workers'])
+                                      shuffle=train_shuffle,
+                                      num_workers=config_file['data_handling']['workers'],
+                                      sampler=train_sampler)
       validdss = CSVDataset(validlist,config_file)
       validds = CSVDataset.get_loader(validdss,batch_size=config_file['training']['batch_size'],
                                       shuffle=config_file['data_handling']['shuffle'],
-                                      num_workers=config_file['data_handling']['workers'])
+                                      num_workers=1)
 
    elif 'csv_pool' == config_file['data_handling']['input_format']:
       logger.info('using CSV pool data handler')

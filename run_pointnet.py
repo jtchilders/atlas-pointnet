@@ -120,14 +120,15 @@ def main():
       config_file['training']['epochs'] = args.epochs
 
    logger.info('configuration = \n%s',json.dumps(config_file, indent=4, sort_keys=True))
+   config_file['hvd'] = hvd
 
    # get datasets for training and validation
    trainds,validds = datautils.get_datasets(config_file)
    
    # setup tensorboard
    writer = None
-   if args.logdir:
-      writer = tensorboardX.SummaryWriter(log_dir=args.logdir)
+   if args.logdir and rank == 0:
+      writer = tensorboardX.SummaryWriter(args.logdir)
    
    logger.info('building model')
    if 'pytorch' in config_file['model']['framework']:
@@ -151,7 +152,7 @@ def main():
       logger.info('trainable parameters: %s',total_params)
 
       if args.valid_only:
-         model.valid_model(net,validds,config_file)
+         net.valid_model(validds,config_file)
       else:
          net.train_model(opt,lrsched,trainds,validds,config_file,writer)
             
