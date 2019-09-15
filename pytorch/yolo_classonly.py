@@ -11,12 +11,12 @@ class YOLO_PRECONNECT(torch.nn.Module):
       super(YOLO_PRECONNECT,self).__init__()
 
       self.conv1 = utils.Conv2d(channels,64,(3,3),padding=1,pool=True,pool_size=(2,4))
-      self.conv2 = utils.Conv2d(64,128,(3,3),padding=1,pool=False)
+      self.conv2 = utils.Conv2d(64,128,(3,3),padding=1,pool=True,pool_size=(2,4))
       self.conv3 = utils.Conv2d(128,256,(3,3),padding=1,pool=False)
-      self.conv4 = utils.Conv2d(256,512,(3,3),padding=1,pool=True,pool_size=(2,4))
-      self.conv5 = utils.Conv2d(512,256,(1,1),pool=False)
-      self.conv6 = utils.Conv2d(256,512,(3,3),padding=1,pool=False)
-      self.conv7 = utils.Conv2d(512,256,(1,1),pool=False)
+      #self.conv4 = utils.Conv2d(256,512,(3,3),padding=1,pool=True,pool_size=(2,4))
+      #self.conv5 = utils.Conv2d(512,256,(1,1),pool=False)
+      #self.conv6 = utils.Conv2d(256,512,(3,3),padding=1,pool=False)
+      #self.conv7 = utils.Conv2d(512,256,(1,1),pool=False)
       self.conv8 = utils.Conv2d(256,512,(3,3),padding=1,pool=True,pool_size=(2,4))
 
       self.output_size = 512
@@ -27,10 +27,10 @@ class YOLO_PRECONNECT(torch.nn.Module):
       x = self.conv1(x)
       x = self.conv2(x)
       x = self.conv3(x)
-      x = self.conv4(x)
-      x = self.conv5(x)
-      x = self.conv6(x)
-      x = self.conv7(x)
+      #x = self.conv4(x)
+      #x = self.conv5(x)
+      #x = self.conv6(x)
+      #x = self.conv7(x)
       x = self.conv8(x)
 
       return x
@@ -61,6 +61,8 @@ class YOLO_POSTCONNECT(torch.nn.Module):
 
 
 class YOLOClassOnly(torch.nn.Module):
+   CrossEntropyLoss = torch.nn.CrossEntropyLoss(reduction='none')
+   BCEWithLogitsLoss = None
    def __init__(self,config):
       super(YOLOClassOnly,self).__init__()
 
@@ -83,6 +85,10 @@ class YOLOClassOnly(torch.nn.Module):
 
       self.output_grid = (gridh,gridw)
       logger.info('grid size = %s x %s',self.output_grid[0],self.output_grid[1])
+
+      if YOLOClassOnly.BCEWithLogitsLoss is None:
+         pos_weight = torch.Tensor(gridh,gridw).fill_(gridh * gridw)
+         YOLOClassOnly.BCEWithLogitsLoss = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
    def forward(self,x):
 
@@ -119,6 +125,8 @@ class YOLOClassOnly(torch.nn.Module):
       acc_time = CalcMean.CalcMean()
 
       monitor_loss = CalcMean.CalcMean()
+      monitor_grid_loss = CalcMean.CalcMean()
+      monitor_class_loss = CalcMean.CalcMean()
 
       valid_batch_counter = 0
       for epoch in range(epochs):
@@ -157,7 +165,10 @@ class YOLOClassOnly(torch.nn.Module):
             # logger.debug('got outputs: %s targets: %s',outputs,targets)
 
             start_loss = end_forward
-            loss_value = self.grid_id_loss(outputs,targets)
+            grid_loss,class_loss = self.loss(outputs,targets)
+            monitor_grid_loss.add_value(grid_loss)
+            monitor_class_loss.add_value(class_loss)
+            loss_value = grid_loss + class_loss
             end_loss = time.time()
             monitor_loss.add_value(loss_value)
             # logger.debug('got loss')
@@ -188,7 +199,7 @@ class YOLOClassOnly(torch.nn.Module):
                   mean_img_per_second = (forward_time.calc_mean() + backward_time.calc_mean()) / batch_size
                   mean_img_per_second = 1. / mean_img_per_second
                   
-                  logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f move time: %6.3f forward time: %6.3f loss time: %6.3f  backward time: %6.3f acc time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),acc_value.item(),mean_img_per_second,data_time.calc_mean(),move_time.calc_mean(),forward_time.calc_mean(),acc_time.calc_mean(),backward_time.calc_mean(),acc_time.calc_mean(),batch_time.calc_mean())
+                  logger.info('<[%3d of %3d, %5d of %5d]> train loss: %5.2f + %5.2f = %5.2f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f move time: %6.3f forward time: %6.3f loss time: %6.3f  backward time: %6.3f acc time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_grid_loss.calc_mean(),monitor_class_loss.calc_mean(),monitor_loss.calc_mean(),acc_value.item(),mean_img_per_second,data_time.calc_mean(),move_time.calc_mean(),forward_time.calc_mean(),acc_time.calc_mean(),backward_time.calc_mean(),acc_time.calc_mean(),batch_time.calc_mean())
                   # logger.info('running count = %s',trainds.running_class_count)
                   # logger.info('prediction = %s',torch.nn.Softmax(dim=1)(outputs))
 
@@ -223,7 +234,8 @@ class YOLOClassOnly(torch.nn.Module):
 
                      outputs = self(inputs)
 
-                     loss_value = self.grid_id_loss(outputs,targets)
+                     grid_loss,class_loss = self.loss(outputs,targets)
+                     loss_value = grid_loss + class_loss
                      acc_value = self.grid_id_accuracy(outputs,targets)
 
                      if writer:
@@ -248,10 +260,39 @@ class YOLOClassOnly(torch.nn.Module):
       # print('pred_grid_conf = ',pred_grid_conf.shape,'true_grid_conf=',true_grid_conf.shape)
       # agreement of grid level object exits label
       # grid_id_loss = torch.sum( (true_grid_conf - pred_grid_conf) ** 2 )
-      pos_weight = torch.Tensor(pred_grid_conf.size(1),pred_grid_conf.size(2)).fill_(pred_grid_conf.size(1) * pred_grid_conf.size(2))
-      grid_id_loss = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)(pred_grid_conf,true_grid_conf)
+      # pos_weight = torch.Tensor(pred_grid_conf.size(1),pred_grid_conf.size(2)).fill_(pred_grid_conf.size(1) * pred_grid_conf.size(2))
+      grid_id_loss = YOLOClassOnly.BCEWithLogitsLoss(pred_grid_conf,true_grid_conf)
 
       return grid_id_loss
+
+   @staticmethod
+   def class_loss(outputs,targets):
+      true_grid_conf = targets[:,0,...].float()
+      pred_class = outputs[:,1:,...]
+      true_class = targets[:,1,...].float()
+      class_loss = YOLOClassOnly.CrossEntropyLoss(pred_class,true_class)
+      class_loss = class_loss * true_grid_conf
+      class_loss = torch.sum(torch.sum(class_loss,1),1)
+      class_loss = torch.mean(class_loss)
+
+      return class_loss
+
+   @staticmethod
+   def loss(outputs,targets):
+      pred_grid_conf = outputs[:,0,...].float()
+      true_grid_conf = targets[:,0,...].float()
+      # pos_weight = torch.Tensor(pred_grid_conf.size(1),pred_grid_conf.size(2)).fill_(pred_grid_conf.size(1) * pred_grid_conf.size(2))
+      grid_id_loss = YOLOClassOnly.BCEWithLogitsLoss(pred_grid_conf,true_grid_conf)
+
+      pred_class = outputs[:,1:,...]
+      true_class = targets[:,1,...].long()
+      class_loss = YOLOClassOnly.CrossEntropyLoss(pred_class,true_class)
+      class_loss = class_loss * true_grid_conf
+      class_loss = torch.sum(torch.sum(class_loss,1),1)
+      class_loss = torch.mean(class_loss)
+
+      return grid_id_loss,class_loss
+
 
    @staticmethod
    def grid_id_accuracy(outputs,targets):
