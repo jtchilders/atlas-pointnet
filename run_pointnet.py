@@ -38,6 +38,8 @@ def main():
 
    parser.add_argument('--horovod',default=False, action='store_true', help="Setup for distributed training")
 
+   parser.add_argument('--filelist_base',default='filelist',help='base filename for the output filelists')
+
    parser.add_argument('--debug', dest='debug', default=False, action='store_true', help="Set Logger to DEBUG")
    parser.add_argument('--error', dest='error', default=False, action='store_true', help="Set Logger to ERROR")
    parser.add_argument('--warning', dest='warning', default=False, action='store_true', help="Set Logger to ERROR")
@@ -94,6 +96,7 @@ def main():
    logger.info('logdir:             %s',args.logdir)
    logger.info('batch_limiter:      %s',args.batch_limiter)
    logger.info('num_threads:        %s',torch.get_num_threads())
+   logger.info('filelist_base:      %s',args.filelist_base)
 
    np.random.seed(args.random_seed)
 
@@ -109,6 +112,7 @@ def main():
    config_file['model_save'] = args.model_save
    config_file['valid_only'] = args.valid_only
    config_file['batch_limiter'] = args.batch_limiter
+   config_file['filelist_base'] = args.filelist_base
 
    if args.valid_only and not args.input_model_pars:
       logger.error('if valid_only set, must provide input model')
