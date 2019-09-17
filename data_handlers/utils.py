@@ -1,4 +1,4 @@
-import logging,glob
+import logging,glob,json
 import numpy as np
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ def get_filelistA(config_file):
    if len(train_filelist) < 1 or len(valid_filelist) < 1:
       raise Exception('length of file list needs to be at least 1 for train (%s) and val (%s) samples',len(train_filelist),len(valid_filelist))
 
-   logger.warning('first file: %s',train_filelist[0])
+   #logger.warning('first file: %s',train_filelist[0])
 
    return train_filelist,valid_filelist
 
@@ -38,6 +38,7 @@ def get_filelistB(config_file):
 
    # get glob string
    glob_str = config_file['data_handling']['glob']
+   batch_size = config_file['training']['batch_size']
 
    # glob for full filelist
    full_filelist = sorted(glob.glob(glob_str))
@@ -58,13 +59,18 @@ def get_filelistB(config_file):
    ntrain = int(nfiles * trainfrac)
 
    train_filelist = full_filelist[:ntrain]
+   train_filelist = train_filelist[:(len(train_filelist) // batch_size) * batch_size]
    valid_filelist = full_filelist[ntrain:]
+   valid_filelist = valid_filelist[:(len(valid_filelist) // batch_size) * batch_size]
    logger.info('found %s training files, %s validation files',len(train_filelist),len(valid_filelist))
    
    if len(train_filelist) < 1 or len(valid_filelist) < 1:
       raise Exception('length of file list needs to be at least 1 for train (%s) and val (%s) samples',len(train_filelist),len(valid_filelist))
 
-   logger.warning('first file: %s',train_filelist[0])
+   #logger.warning('first file: %s',train_filelist[0])
+
+   json.dump(train_filelist,open(config_file['filelist_base'] + '.trainlist','w'),indent=4, sort_keys=True)
+   json.dump(valid_filelist,open(config_file['filelist_base'] + '.validlist','w'),indent=4, sort_keys=True)
    
    return train_filelist,valid_filelist
 
@@ -116,7 +122,7 @@ def get_datasets(config_file):
       validdss = CSVDataset(validlist,config_file)
       validds = CSVDataset.get_loader(validdss,batch_size=config_file['training']['batch_size'],
                                       shuffle=config_file['data_handling']['shuffle'],
-                                      num_workers=1)
+                                      num_workers=0)
 
    elif 'csv_pool' == config_file['data_handling']['input_format']:
       logger.info('using CSV pool data handler')
@@ -138,6 +144,6 @@ def get_datasets(config_file):
                                         shuffle=config_file['data_handling']['shuffle'],
                                         num_workers=config_file['data_handling']['workers'])
    else:
-      raise Exception('no input file format specified in configuration')
+      raise Exception('no input file format specified in configuration, setting is %s' % config_file['data_handling']['input_format'])
 
    return trainds,validds
