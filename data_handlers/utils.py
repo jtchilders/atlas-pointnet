@@ -35,6 +35,9 @@ def get_filelistA(config_file):
 
 
 def get_filelistB(config_file):
+   batch_limiter = None
+   if 'batch_limiter' in config_file:
+      batch_limiter = config_file['batch_limiter']
 
    # get glob string
    glob_str = config_file['data_handling']['glob']
@@ -56,10 +59,12 @@ def get_filelistB(config_file):
    # get training fraction
    trainfrac = config_file['data_handling']['train_fraction']
    # calculate number of files to use for training
-   ntrain = int(nfiles * trainfrac)
-
-   train_filelist = full_filelist[:ntrain]
    train_filelist = train_filelist[:(len(train_filelist) // batch_size) * batch_size]
+
+   if batch_limiter:
+      maxfile = batch_limiter * config_file['training']['batch_size'] / config_file['data_handling']['evt_per_file']
+      train_filelist = train_filelist[0:int(maxfile + 1)]
+
    valid_filelist = full_filelist[ntrain:]
    valid_filelist = valid_filelist[:(len(valid_filelist) // batch_size) * batch_size]
    logger.info('found %s training files, %s validation files',len(train_filelist),len(valid_filelist))
@@ -90,8 +95,13 @@ def get_shard(config_file,filelist):
 
 def get_datasets(config_file):
 
+   batch_size = config_file['training']['batch_size']
    logger.info('getting filelists')
    trainlist,validlist = get_filelist(config_file)
+
+   # ensure integral number of images for batch_size
+   trainlist = trainlist[:int(len(trainlist) / 1. * batch_size) * batch_size - 1]
+   validlist = validlist[:int(len(validlist) / 1. * batch_size) * batch_size - 1]
 
    hvd = config_file['hvd']
    rank = config_file['rank']
@@ -103,7 +113,25 @@ def get_datasets(config_file):
       logger.info('creating batch generators')
       trainds = BatchGenerator(trainlist,config_file,'BatchGen:train')
       validds = BatchGenerator(validlist,config_file,'BatchGen:valid')
-
+   elif 'dataset_csv_semseg' == config_file['data_handling']['input_format']:
+      logger.info('using CSV Dataset data handler for semantic segmentation')
+      from data_handlers.pytorch_dataset_csv_semseg import CSVDataset
+      logger.info('creating batch generators')
+      traindss = CSVDataset(trainlist,config_file)
+      train_sampler = None
+      train_shuffle = config_file['data_handling']['shuffle']
+      if hvd is not None:
+         import torch
+         train_sampler = torch.utils.data.distributed.DistributedSampler(traindss,num_replicas=nranks,rank=rank)
+         train_shuffle = False
+      trainds = CSVDataset.get_loader(traindss,batch_size=config_file['training']['batch_size'],
+                                      shuffle=train_shuffle,
+                                      num_workers=config_file['data_handling']['workers'],
+                                      sampler=train_sampler)
+      validdss = CSVDataset(validlist,config_file)
+      validds = CSVDataset.get_loader(validdss,batch_size=config_file['training']['batch_size'],
+                                      shuffle=config_file['data_handling']['shuffle'],
+                                      num_workers=1)
    elif 'dataset_csv' == config_file['data_handling']['input_format']:
       logger.info('using CSV Dataset data handler')
       from data_handlers.pytorch_dataset_csv import CSVDataset

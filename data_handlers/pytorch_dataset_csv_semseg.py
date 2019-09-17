@@ -1,4 +1,5 @@
 from torch.utils import data as td
+import torch
 import logging,pandas as pd
 import numpy as np
 logger = logging.getLogger(__name__)
@@ -22,16 +23,21 @@ class CSVDataset(td.Dataset):
                            'Et': np.float32, 'pid': np.float32, 'n': np.float32, 
                            'trk_good': np.float32, 'trk_id': np.float32, 'trk_pt': np.float32}
 
+      self.class_map = {}
+      for i,entry in enumerate(self.class_ids):
+         self.class_map[entry] = i
+         self.class_map[-entry] = i
+
    def __getitem__(self,index):
       filename = self.filelist[index]
       try:
-         #logger.debug('opening file: %s',filename)
+         logger.debug('opening file: %s',filename)
          self.data = pd.read_csv(filename,header=None,names=self.col_names, dtype=self.col_dtype, sep='\t')
       except:
          logger.exception('exception received when opening file %s',filename)
          raise
 
-      return (self.get_input(),self.get_target(filename))
+      return (self.get_input(),self.get_target())
 
    def get_input(self):
       if hasattr(self,'data'):
@@ -43,20 +49,20 @@ class CSVDataset(td.Dataset):
          
          input = np.tile(input,(int(self.img_shape[0] / input.shape[0]) + 1,1))[:self.img_shape[0],...]
          input = input.transpose()
+         # logger.info('input = %s',input.shape)
          return input
       else:
          raise Exception('no data attribute')
 
-   def get_target(self,filename):
+   def get_target(self):
       if hasattr(self,'data'):
-         target = self.data['pid'][0]
-         if self.config['data_handling']['treat_cjet_as_ljet'] and target == 4:
-            target = 0.
-         try:
-            target = self.class_ids.index(np.abs(target))
-         except:
-            logger.exception('ID %s not recognized in file: %s',target,filename)
-         return target
+         target = self.data['pid']
+         # logger.info('target = %s',target.shape)
+         target = target.map(self.class_map)
+         # logger.info('target map = %s',target.shape)
+         target = np.tile(target,(int(self.img_shape[0] / target.shape[0]) + 1,))[:self.img_shape[0],...]
+         # logger.info('target tiled = %s',target.shape)
+         return torch.from_numpy(target)
       else:
          raise Exception('no data attribute')
 
