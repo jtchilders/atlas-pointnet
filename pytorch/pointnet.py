@@ -58,6 +58,7 @@ class PointNet2d(torch.nn.Module):
       x = self.pool(x)
       
       x = x.reshape([batch_size,-1])
+      endpoints['global_features'] = x
       
       x = self.linear512(x)
       x = self.dropoutA(x)
@@ -156,31 +157,35 @@ class PointNet1d(torch.nn.Module):
       
    def forward(self,x):
       batch_size = x.shape[0]
-      # l=10
-      # print('pointnet1d input: %s' % x[0,:l,:])
+      
+      # logger.info(f'input = {x.shape}')
       it = self.input_trans(x)
-      # print('pointnet1d input_trans: %s' % it[0])
-      endpoints = {'input_trans':it}
+
       x = torch.bmm(it,x)
-      # print('pointnet1d it*x: %s' % x[0,:l,:l])
+      endpoints = {'input_trans':x}
+      # logger.info(f'input_trans = {x.shape}')
       
       x = self.input_to_feature(x)
+      # logger.info(f'input_to_feature = {x.shape}')
       
       ft = self.feature_trans(x)
-      # print('pointnet1d feature_trans: %s' % ft[0,:10,:10])
-      endpoints['feature_trans'] = ft
+
       x = torch.bmm(ft,x)
-      # print('pointnet1d ft*x: %s' % x[0,:l,:l])
+      endpoints['feature_trans'] = x
+      # logger.info(f'feature_trans = {x.shape}')
       
       x = self.feature_to_pool(x)
+      # logger.info(f'feature_to_pool = {x.shape}')
       
       x = self.pool(x)
-      # print('pointnet1d pool: %s' % x[0,:l,:])
+      # logger.info(f'pool = {x.shape}')
       
       x = x.reshape([batch_size,-1])
-      # print('pointnet1d reshape: %s' % x[0,:l])
+      endpoints['global_features'] = x
+      # logger.info(f'global_features = {x.shape}')
       
       x = self.dense_layers(x)
+      # logger.info(f'dense_layers = {x.shape}')
       
       return x,endpoints
 
@@ -569,3 +574,43 @@ class Transform1d(torch.nn.Module):
       x = x.reshape([batch_size,self.width,self.width])
       
       return x
+
+
+class PointNet1d_SemSeg(torch.nn.Module):
+
+   def __init__(self,config):
+      super(PointNet1d_SemSeg,self).__init__()
+
+      self.pointnet1d = PointNet1d(config)
+
+      nClasses = len(config['data_handling']['classes'])
+      width = 64 + 1024
+
+      self.conv512 = utils.Conv1d(width,512,pool=False)
+      self.conv256 = utils.Conv1d(512,256,pool=False)
+      self.conv128 = utils.Conv1d(256,128,pool=False)
+      self.convclass = utils.Conv1d(128,nClasses,pool=False)
+
+   def forward(self,x):
+
+      image_classes,endpoints = self.pointnet1d(x)
+
+      pointwise_features = endpoints['feature_trans']
+      global_features = endpoints['global_features']
+      global_features = global_features.view(global_features.shape[0],global_features.shape[1],1)
+      global_features = global_features.repeat(1,1,pointwise_features.shape[-1])
+
+      # logger.info(f'{pointwise_features.shape}')
+      # logger.info(f'{global_features.shape}')
+
+      combined = torch.cat((pointwise_features,global_features),1)
+
+      # logger.info(f'{combined.shape}')
+
+
+      x = self.conv512(combined)
+      x = self.conv256(x)
+      x = self.conv128(x)
+      x = self.convclass(x)
+
+      return x,endpoints

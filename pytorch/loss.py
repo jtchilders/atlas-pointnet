@@ -1,45 +1,53 @@
 import torch,logging
+import numpy as np
 logger = logging.getLogger(__name__)
 
 
+class_ids = []
 def get_loss(config):
 
    if 'loss' not in config:
       raise Exception('must include "loss" section in config file')
 
-   config = config['loss']
+   loss_config = config['loss']
 
-   if 'func' not in config:
+   if 'func' not in loss_config:
       raise Exception('must include "func" loss section in config file')
 
-   if 'CrossEntropyLoss' in config['func']:
+   if 'CrossEntropyLoss' in loss_config['func']:
       weight = None
-      if 'weight' in config:
-         weight = config['loss_weight']
+      if 'weight' in loss_config:
+         weight = loss_config['loss_weight']
       size_average = None
-      if 'size_average' in config:
-         size_average = config['loss_size_average']
+      if 'size_average' in loss_config:
+         size_average = loss_config['loss_size_average']
       ignore_index = -100
-      if 'ignore_index' in config:
-         ignore_index = config['loss_ignore_index']
+      if 'ignore_index' in loss_config:
+         ignore_index = loss_config['loss_ignore_index']
       reduce = None
-      if 'reduce' in config:
-         reduce = config['loss_reduce']
+      if 'reduce' in loss_config:
+         reduce = loss_config['loss_reduce']
       reduction = 'mean'
-      if 'reduction' in config:
-         reduction = config['loss_reduction']
+      if 'reduction' in loss_config:
+         reduction = loss_config['loss_reduction']
 
       return torch.nn.CrossEntropyLoss(weight,size_average,ignore_index,reduce,reduction)
-   if 'pointnet_class_loss' in config['func']:
+   if 'pointnet_class_loss' in loss_config['func']:
       return pointnet_class_loss
+   elif 'pixel_wise_cross_entry' in loss_config['func']:
+      global class_ids
+      class_ids = config['data_handling']['class_nums']
+      return pixel_wise_cross_entry
    else:
-      raise Exception('%s loss function is not recognized' % config['func'])
+      raise Exception('%s loss function is not recognized' % loss_config['func'])
 
 
 def get_accuracy(config):
    if 'CrossEntropyLoss' in config['loss']['func'] or 'pointnet_class_loss' in config['loss']['func']:
       
       return multiclass_acc
+   if 'pixel_wise_cross_entry' in config['loss']['func']:
+      return pixel_wise_accuracy
    else:
       if 'func' not in config['model']:
          raise Exception('loss function not defined in config')
@@ -85,4 +93,47 @@ def multiclass_acc(pred,targets):
 
    return torch.sum(eq).float() / float(targets.shape[0])
 
+
+def pixel_wise_accuracy(pred,targets,device='cpu'):
+   # need to calculate the accuracy over all points
+
+   pred_stat = torch.nn.Softmax(dim=1)(pred)
+   _,pred_value = pred_stat.max(dim=1)
+   pred_value = pred_value.long()
+
+   correct = (targets == pred_value).sum()
+   total = float(pred_value.numel())
+
+   acc = correct.float() / total
+
+   return acc
+
+
+def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu'):
+   # for semantic segmentation, need to compare class
+   # prediction for each point AND need to weight by the
+   # number of pixels for each point
+
+   # flatten targets and predictions
+
+   # pred.shape = [N_batch, N_class, N_points]
+   # targets.shape = [N_batch,N_points]
+   # logger.info(f'pred = {pred.shape}  targets = {targets.shape}')
+
+   targets_flat = targets  #.view(-1)
+   pred_flat = pred  #.view(-1,pred.shape[-1])
+
+   weights = []
+   for i in range(len(class_ids)):
+      weights.append((targets_flat == i).sum())
+   weights = torch.Tensor(weights)
+   weights = weights / weights.sum()
+
+   logger.info('weights = %s',weights)
+
+   loss = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weights))
+
+   return loss(pred_flat,targets_flat)
+
+   
 

@@ -1,4 +1,5 @@
 from torch.utils import data as td
+import torch
 import logging,pandas as pd
 import numpy as np
 logger = logging.getLogger(__name__)
@@ -22,6 +23,11 @@ class CSVDataset(td.Dataset):
                            'Et': np.float32, 'pid': np.float32, 'n': np.float32, 
                            'trk_good': np.float32, 'trk_id': np.float32, 'trk_pt': np.float32}
 
+      self.class_map = {}
+      for i,entry in enumerate(self.class_ids):
+         self.class_map[entry] = i
+         self.class_map[-entry] = i
+
    def __getitem__(self,index):
       filename = self.filelist[index]
       try:
@@ -43,15 +49,20 @@ class CSVDataset(td.Dataset):
          
          input = np.tile(input,(int(self.img_shape[0] / input.shape[0]) + 1,1))[:self.img_shape[0],...]
          input = input.transpose()
+         # logger.info('input = %s',input.shape)
          return input
       else:
          raise Exception('no data attribute')
 
    def get_target(self):
       if hasattr(self,'data'):
-         target = self.data['pid'][0]
-         target = self.class_ids.index(np.abs(target))
-         return target
+         target = self.data['pid']
+         # logger.info('target = %s',target.shape)
+         target = target.map(self.class_map)
+         # logger.info('target map = %s',target.shape)
+         target = np.tile(target,(int(self.img_shape[0] / target.shape[0]) + 1,))[:self.img_shape[0],...]
+         # logger.info('target tiled = %s',target.shape)
+         return torch.from_numpy(target)
       else:
          raise Exception('no data attribute')
 
