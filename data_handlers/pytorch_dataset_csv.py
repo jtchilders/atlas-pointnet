@@ -25,13 +25,13 @@ class CSVDataset(td.Dataset):
    def __getitem__(self,index):
       filename = self.filelist[index]
       try:
-         logger.debug('opening file: %s',filename)
+         #logger.debug('opening file: %s',filename)
          self.data = pd.read_csv(filename,header=None,names=self.col_names, dtype=self.col_dtype, sep='\t')
       except:
          logger.exception('exception received when opening file %s',filename)
          raise
 
-      return (self.get_input(),self.get_target())
+      return (self.get_input(),self.get_target(filename))
 
    def get_input(self):
       if hasattr(self,'data'):
@@ -47,10 +47,15 @@ class CSVDataset(td.Dataset):
       else:
          raise Exception('no data attribute')
 
-   def get_target(self):
+   def get_target(self,filename):
       if hasattr(self,'data'):
          target = self.data['pid'][0]
-         target = self.class_ids.index(np.abs(target))
+         if self.config['data_handling']['treat_cjet_as_ljet'] and target == 4:
+            target = 0.
+         try:
+            target = self.class_ids.index(np.abs(target))
+         except:
+            logger.exception('ID %s not recognized in file: %s',target,filename)
          return target
       else:
          raise Exception('no data attribute')

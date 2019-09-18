@@ -134,7 +134,7 @@ class PointNet1d(torch.nn.Module):
       self.input_to_feature = torch.nn.Sequential()
       for x in config['model']['input_to_feature']:
          N_in,N_out,pool = x
-         self.input_to_feature.add_module(f'conv_{N_in}_to_{N_out}',utils.Conv1d(N_in,N_out,pool=pool))
+         self.input_to_feature.add_module('conv_%d_to_%d' % (N_in,N_out),utils.Conv1d(N_in,N_out,pool=pool))
          #utils.Conv1d(nCoords,64,pool=False)
          #utils.Conv1d(64,64,pool=False))
       
@@ -143,7 +143,7 @@ class PointNet1d(torch.nn.Module):
       self.feature_to_pool = torch.nn.Sequential()
       for x in config['model']['feature_to_pool']:
          N_in,N_out,pool = x
-         self.feature_to_pool.add_module(f'conv_{N_in}_to_{N_out}',utils.Conv1d(N_in,N_out,pool=pool))
+         self.feature_to_pool.add_module('conv_%d_to_%d' % (N_in,N_out),utils.Conv1d(N_in,N_out,pool=pool))
          
       self.pool = torch.nn.MaxPool1d(nPoints)
 
@@ -151,9 +151,9 @@ class PointNet1d(torch.nn.Module):
       for x in config['model']['dense_layers']:
          N_in,N_out,dropout,bn,act = x
          dr = int(dropout * 3)
-         self.dense_layers.add_module(f'dense_{N_in}_to_{N_out}',utils.Linear(N_in,N_out,bn=bn,activation=act))
+         self.dense_layers.add_module('dense_%d_to_%d' % (N_in,N_out),utils.Linear(N_in,N_out,bn=bn,activation=act))
          if dropout > 0:
-            self.dense_layers.add_module(f'dropout_{dr:03d}',torch.nn.Dropout(dropout))
+            self.dense_layers.add_module('dropout_%03d' % dr,torch.nn.Dropout(dropout))
       
    def forward(self,x):
       batch_size = x.shape[0]
@@ -192,13 +192,13 @@ class PointNet1d(torch.nn.Module):
    def train_model(self,opt,lrsched,trainds,validds,config,writer=None):
 
       batch_size = config['training']['batch_size']
+      steps_per_valid = config['training']['steps_per_valid']
       status = config['status']
       epochs = config['training']['epochs']
-      nval = config['nval']
-      nval_tests = config['nval_tests']
       nsave = config['nsave']
       model_save = config['model_save']
       rank = config['rank']
+      nranks = config['nranks']
       hvd = config['hvd']
 
       batch_limiter = None
@@ -258,10 +258,11 @@ class PointNet1d(torch.nn.Module):
          for batch_counter,(inputs,targets) in enumerate(trainds_itr):
             end_data = time.time()
             
-            # logger.debug('got training batch %s',batch_counter)
+            logger.debug('got training batch %s',batch_counter)
             start_move = end_data
-            inputs = inputs.to(device)
-            targets = targets.to(device)
+            if torch.cuda.is_available():
+               inputs = inputs.to(device)
+               targets = targets.to(device)
             end_move = time.time()
 
             # logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
@@ -312,7 +313,7 @@ class PointNet1d(torch.nn.Module):
                # logger.info('prediction = %s',torch.nn.Softmax(dim=1)(outputs))
 
                if writer and rank == 0:
-                  global_batch = epoch * len(trainds) + batch_counter
+                  global_batch = (epoch * len(trainds) + batch_counter) * nranks * batch_size
                   writer.add_scalars('loss',{'train':monitor_loss.calc_mean()},global_batch)
                   writer.add_scalars('accuracy',{'train':acc_value.item()},global_batch)
                   writer.add_scalar('image_per_second',mean_img_per_second,global_batch)
@@ -329,10 +330,17 @@ class PointNet1d(torch.nn.Module):
 
             # end training loop, check if should exit
             if batch_limiter is not None and batch_counter > batch_limiter: break
+
+            logger.debug('end batch loop')
+
+         # save the model at end of epoch
+         if rank == 0:
+            torch.save(self.state_dict(),model_save + '_%05d.torch_model_state_dict' % epoch)
          
          # if this is set, skip validation
          if batch_limiter is not None: break
 
+         logger.info('running validation')
          # every epoch, evaluate validation data set
          self.eval()
 
@@ -344,7 +352,7 @@ class PointNet1d(torch.nn.Module):
          vacc = CalcMean.CalcMean()
 
          for valid_batch_counter,(inputs,targets) in enumerate(validds_itr):
-
+            logger.debug('got valid bunch %s',valid_batch_counter)
             inputs = inputs.to(device)
             targets = targets.to(device)
 
@@ -355,17 +363,22 @@ class PointNet1d(torch.nn.Module):
             acc_value = acc(outputs,targets)
             vacc.add_value(acc_value.item())
 
+            if valid_batch_counter > steps_per_valid:
+               break
+
+         # record result
          if writer and rank == 0:
-            global_batch = epoch * len(trainds) + batch_counter
-            writer.add_scalars('loss',{'valid':loss_value.item()},global_batch)
-            writer.add_scalars('accuracy',{'valid':acc_value.item()},global_batch)
-
-         if valid_batch_counter > nval_tests:
-            break
+            global_batch = (epoch * len(trainds) + batch_counter) * nranks * batch_size
+            writer.add_scalars('loss',{'valid':vloss.calc_mean()},global_batch)
+            writer.add_scalars('accuracy',{'valid':vacc.calc_mean()},global_batch)
             
-         logger.info('>[%3d of %3d, %5d of %5d]<<< valid loss: %6.4f valid acc: %6.4f >>>',epoch + 1,epochs,batch_counter,len(trainds),vloss.calc_mean(),vacc.calc_mean())
+         logger.info('<<< average over %s steps:  valid loss: %6.4f valid acc: %6.4f >>>',steps_per_valid,vloss.calc_mean(),vacc.calc_mean())
+         del vloss,vacc
 
+         # switch back to training mode
          self.train()
+
+         logger.info('done running validation')
 
          
             
