@@ -58,6 +58,10 @@ def get_filelistB(config_file):
 
    # get training fraction
    trainfrac = config_file['data_handling']['train_fraction']
+   ntrain = int(nfiles * trainfrac)
+
+   train_filelist = full_filelist[:ntrain]
+   
    # calculate number of files to use for training
    train_filelist = train_filelist[:(len(train_filelist) // batch_size) * batch_size]
 
