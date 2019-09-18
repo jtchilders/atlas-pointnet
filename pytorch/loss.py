@@ -127,7 +127,7 @@ def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu'):
    for i in range(len(class_ids)):
       weights.append((targets_flat == i).sum())
    weights = torch.Tensor(weights)
-   weights = weights / weights.sum()
+   weights = 1. / weights
 
    logger.info('weights = %s',weights)
 
