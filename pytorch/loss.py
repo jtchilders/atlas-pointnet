@@ -99,9 +99,8 @@ def pixel_wise_accuracy(pred,targets,device='cpu'):
 
    pred_stat = torch.nn.Softmax(dim=1)(pred)
    _,pred_value = pred_stat.max(dim=1)
-   pred_value = pred_value.long()
 
-   correct = (targets == pred_value).sum()
+   correct = (targets.long() == pred_value).sum()
    total = float(pred_value.numel())
 
    acc = correct.float() / total
@@ -133,7 +132,7 @@ def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu'):
 
    loss = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weights))
 
-   return loss(pred_flat,targets_flat)
+   return loss(pred_flat,targets_flat.long())
 
    
 

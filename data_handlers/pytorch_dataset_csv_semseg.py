@@ -9,9 +9,15 @@ class CSVDataset(td.Dataset):
    def __init__(self,filelist,config):
       super(CSVDataset,self).__init__()
       self.config       = config
+      batch_limiter = None
+      if 'batch_limiter' in config:
+         batch_limiter = config['batch_limiter']
+
       self.img_shape    = config['data_handling']['image_shape']
       self.class_ids    = config['data_handling']['class_nums']
       self.filelist     = filelist
+      if batch_limiter is not None:
+         self.filelist = filelist[:batch_limiter]
       self.len          = len(self.filelist)
       # self.col_names    = ['id', 'index', 'x', 'y', 'z', 'eta', 'phi','r','Et','pid','true_pt']
       self.col_names    = ['id', 'index', 'x', 'y', 'z', 'eta', 'phi', 'r', 'Et','pid','n','trk_good','trk_id','trk_pt']
@@ -48,7 +54,7 @@ class CSVDataset(td.Dataset):
             input = self.data[['eta','phi','r','Et']]
          
          input = np.tile(input,(int(self.img_shape[0] / input.shape[0]) + 1,1))[:self.img_shape[0],...]
-         input = input.transpose()
+         input = np.float32(input.transpose())
          # logger.info('input = %s',input.shape)
          return input
       else:
@@ -61,7 +67,7 @@ class CSVDataset(td.Dataset):
          target = target.map(self.class_map)
          # logger.info('target map = %s',target.shape)
          target = np.tile(target,(int(self.img_shape[0] / target.shape[0]) + 1,))[:self.img_shape[0],...]
-         target = np.int64(target)
+         target = np.int32(target)
          # logger.info('target tiled = %s',target.shape)
          return torch.from_numpy(target)
       else:

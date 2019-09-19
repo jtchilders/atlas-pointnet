@@ -44,6 +44,7 @@ def get_model(config):
       
       import pytorch.pointnet as pointnet
       model = pointnet.PointNet1d(config)
+      model.float()
       model.to(device)
       return model
    elif 'yolo_classonly' in config['model']['model']:
@@ -93,9 +94,9 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
    rank = config['rank']
    # hvd = config['hvd']
 
-   batch_limiter = None
-   if 'batch_limiter' in config:
-      batch_limiter = config['batch_limiter']
+   # batch_limiter = None
+   # if 'batch_limiter' in config:
+   #    batch_limiter = config['batch_limiter']
 
    # some data handlers need a restart
    if callable(getattr(validds,'start_epoch',None)):
@@ -229,12 +230,12 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          start_data = time.time()
 
          # end training loop, check if should exit
-         if batch_limiter is not None and batch_counter > batch_limiter:
-            break
+         # if batch_limiter is not None and batch_counter > batch_limiter:
+         #    break
       
       # if this is set, skip validation
-      if batch_limiter is not None:
-         break
+      # if batch_limiter is not None:
+      #    break
 
       # every epoch, evaluate validation data set
       model.eval()
