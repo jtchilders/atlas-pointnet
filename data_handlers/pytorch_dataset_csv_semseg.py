@@ -61,6 +61,7 @@ class CSVDataset(td.Dataset):
          target = target.map(self.class_map)
          # logger.info('target map = %s',target.shape)
          target = np.tile(target,(int(self.img_shape[0] / target.shape[0]) + 1,))[:self.img_shape[0],...]
+         target = np.int64(target)
          # logger.info('target tiled = %s',target.shape)
          return torch.from_numpy(target)
       else:
