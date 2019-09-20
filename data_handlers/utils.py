@@ -35,12 +35,13 @@ def get_filelistA(config_file):
 
 
 def get_filelistB(config_file):
-   batch_limiter = None
-   if 'batch_limiter' in config_file:
-      batch_limiter = config_file['batch_limiter']
+   # batch_limiter = None
+   # if 'batch_limiter' in config_file:
+   #    batch_limiter = config_file['batch_limiter']
 
    # get glob string
    glob_str = config_file['data_handling']['glob']
+   logger.info('using glob string to find input files: %s',glob_str)
    batch_size = config_file['training']['batch_size']
 
    # glob for full filelist
@@ -63,14 +64,14 @@ def get_filelistB(config_file):
    train_filelist = full_filelist[:ntrain]
    
    # calculate number of files to use for training
-   train_filelist = train_filelist[:(len(train_filelist) // batch_size) * batch_size]
+   # train_filelist = train_filelist[:(len(train_filelist) // batch_size) * batch_size]
 
-   if batch_limiter:
-      maxfile = batch_limiter * config_file['training']['batch_size'] / config_file['data_handling']['evt_per_file']
-      train_filelist = train_filelist[0:int(maxfile + 1)]
+   # if batch_limiter:
+   #    maxfile = batch_limiter * config_file['training']['batch_size'] / config_file['data_handling']['evt_per_file']
+   #    train_filelist = train_filelist[0:int(maxfile + 1)]
 
    valid_filelist = full_filelist[ntrain:]
-   valid_filelist = valid_filelist[:(len(valid_filelist) // batch_size) * batch_size]
+   # valid_filelist = valid_filelist[:(len(valid_filelist) // batch_size) * batch_size]
    logger.info('found %s training files, %s validation files',len(train_filelist),len(valid_filelist))
    
    if len(train_filelist) < 1 or len(valid_filelist) < 1:
@@ -99,13 +100,8 @@ def get_shard(config_file,filelist):
 
 def get_datasets(config_file):
 
-   batch_size = config_file['training']['batch_size']
    logger.info('getting filelists')
    trainlist,validlist = get_filelist(config_file)
-
-   # ensure integral number of images for batch_size
-   trainlist = trainlist[:int(len(trainlist) / 1. * batch_size) * batch_size - 1]
-   validlist = validlist[:int(len(validlist) / 1. * batch_size) * batch_size - 1]
 
    hvd = config_file['hvd']
    rank = config_file['rank']
@@ -135,7 +131,7 @@ def get_datasets(config_file):
       validdss = CSVDataset(validlist,config_file)
       validds = CSVDataset.get_loader(validdss,batch_size=config_file['training']['batch_size'],
                                       shuffle=config_file['data_handling']['shuffle'],
-                                      num_workers=1)
+                                      num_workers=0)
    elif 'dataset_csv' == config_file['data_handling']['input_format']:
       logger.info('using CSV Dataset data handler')
       from data_handlers.pytorch_dataset_csv import CSVDataset
@@ -177,5 +173,7 @@ def get_datasets(config_file):
                                         num_workers=config_file['data_handling']['workers'])
    else:
       raise Exception('no input file format specified in configuration, setting is %s' % config_file['data_handling']['input_format'])
+
+   logger.info('generated training and validation datasets: %s %s',len(trainds),len(validds))
 
    return trainds,validds
