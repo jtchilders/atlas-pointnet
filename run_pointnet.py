@@ -160,7 +160,9 @@ def main():
 
       if args.flops:
          from ptflops import get_model_complexity_info
-         flops,params = get_model_complexity_info(net,tuple(config_file['data_handling']['image_shape']),print_per_layer_stat=False,as_strings=False)
+         input_shape = config_file['data_handling']['image_shape']
+         input_shape = [input_shape[i] for i in range(len(input_shape)-1,-1,-1)]
+         flops,params = get_model_complexity_info(net,tuple(input_shape),print_per_layer_stat=False,as_strings=False)
          logger.info('flops %s parameters %s',flops,params)
 
       total_params = sum(p.numel() for p in net.parameters())
