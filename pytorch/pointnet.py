@@ -599,10 +599,10 @@ class PointNet1d_SemSeg(torch.nn.Module):
       nClasses = len(config['data_handling']['classes'])
       width = 64 + 1024
 
-      self.conv512 = utils.Conv1d(width,512,pool=False)
-      self.conv256 = utils.Conv1d(512,256,pool=False)
-      self.conv128 = utils.Conv1d(256,128,pool=False)
-      self.convclass = utils.Conv1d(128,nClasses,pool=False)
+      self.conv512 = utils.Conv1d(width,512,bn=False,pool=False)
+      self.conv256 = utils.Conv1d(512,256,bn=False,pool=False)
+      self.conv128 = utils.Conv1d(256,128,bn=False,pool=False)
+      self.convclass = utils.Conv1d(128,nClasses,bn=False,pool=False)
 
    def forward(self,x):
 
