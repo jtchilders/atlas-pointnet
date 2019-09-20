@@ -40,6 +40,8 @@ def main():
 
    parser.add_argument('--filelist_base',default='filelist',help='base filename for the output filelists')
 
+   parser.add_argument('--flops',default=False,action='store_true',help='if you have module "flops-counter.pytorch" installed, this will try to give you a flops count for the model.')
+
    parser.add_argument('--debug', dest='debug', default=False, action='store_true', help="Set Logger to DEBUG")
    parser.add_argument('--error', dest='error', default=False, action='store_true', help="Set Logger to ERROR")
    parser.add_argument('--warning', dest='warning', default=False, action='store_true', help="Set Logger to ERROR")
@@ -97,12 +99,14 @@ def main():
    logger.info('batch_limiter:      %s',args.batch_limiter)
    logger.info('num_threads:        %s',torch.get_num_threads())
    logger.info('filelist_base:      %s',args.filelist_base)
+   logger.info('flops:              %s',args.flops)
 
    np.random.seed(args.random_seed)
 
    config_file = json.load(open(args.config_file))
    config_file['rank'] = rank
    config_file['nranks'] = nranks
+   config_file['flops'] = args.flops
    config_file['input_model_pars'] = args.input_model_pars
    config_file['horovod'] = args.horovod
    config_file['status'] = args.status
@@ -119,8 +123,10 @@ def main():
       return
 
    if args.batch > 0:
+      logger.info('setting batch size from command line: %s', args.batch)
       config_file['training']['batch_size'] = args.batch
    if args.epochs > 0:
+      logger.info('setting epochs from command line: %s', args.epochs)
       config_file['training']['epochs'] = args.epochs
 
    logger.info('configuration = \n%s',json.dumps(config_file, indent=4, sort_keys=True))
@@ -151,6 +157,11 @@ def main():
       #accfunc = loss.get_accuracy(config_file)
 
       logger.info('model = \n %s',net)
+
+      if args.flops:
+         from ptflops import get_model_complexity_info
+         flops,params = get_model_complexity_info(net,tuple(config_file['data_handling']['image_shape']),print_per_layer_stat=False,as_strings=False)
+         logger.info('flops %s parameters %s',flops,params)
 
       total_params = sum(p.numel() for p in net.parameters())
       logger.info('trainable parameters: %s',total_params)
