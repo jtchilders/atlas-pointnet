@@ -119,20 +119,19 @@ def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu'):
    # targets.shape = [N_batch,N_points]
    # logger.info(f'pred = {pred.shape}  targets = {targets.shape}')
 
-   targets_flat = targets  #.view(-1)
-   pred_flat = pred  #.view(-1,pred.shape[-1])
-
    weights = []
    for i in range(len(class_ids)):
-      weights.append((targets_flat == i).sum())
+      weights.append((targets == i).sum())
    weights = torch.Tensor(weights)
-   weights = 1. / weights
+   weights = weights.sum() / weights
+   weights[weights == float('Inf')] = 0
 
    logger.info('weights = %s',weights)
 
    loss = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weights))
 
-   return loss(pred_flat,targets_flat.long())
+   loss_value = loss(pred,targets.long())
+   logger.info(' pred[0,...,0] = %s targets[0,0] = %s loss = %s',pred[0,...,0],targets[0,0],loss_value)
 
-   
+   return loss_value
 
