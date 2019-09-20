@@ -99,11 +99,10 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
    #    batch_limiter = config['batch_limiter']
 
    # some data handlers need a restart
-   if callable(getattr(validds,'start_epoch',None)):
+   if 'csv_pool' == config['data_handling']['input_format']:
       validds.start_epoch()
 
-   # get data iterator for validation
-   if callable(getattr(validds,'batch_gen',None)):
+      # get data iterator for validation
       logger.info('using batch_gen method for valid')
       validds_itr = iter(validds.batch_gen())
    else:
@@ -128,11 +127,10 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
       logger.info(' epoch %s of %s',epoch,epochs)
 
       # some data handlers need a restart
-      if callable(getattr(trainds,'start_epoch',None)):
+      if 'csv_pool' == config['data_handling']['input_format']:
          trainds.start_epoch()
 
-      # get data iterator
-      if callable(getattr(trainds,'batch_gen',None)):
+         # get data iterator
          logger.info('using batch_gen method for train')
          trainds_itr = iter(trainds.batch_gen())
       else:
@@ -151,7 +149,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
       for batch_counter,(inputs,targets) in enumerate(trainds_itr):
          end_data = time.time()
 
-         logger.info('inputs: %s targets: %s',inputs.shape,targets.shape)
+         # logger.info('inputs: %s targets: %s',inputs.shape,targets.shape)
 
          if inputs.shape[0] != batch_size:
             logger.warning('input has incorrect batch size: %s',inputs.shape)
@@ -233,6 +231,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          # if batch_limiter is not None and batch_counter > batch_limiter:
          #    break
       
+      logger.info('epoch %s complete, running validation on %s batches',epoch,nval_tests)
       # if this is set, skip validation
       # if batch_limiter is not None:
       #    break
@@ -248,6 +247,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
       vacc = CalcMean.CalcMean()
 
       for valid_batch_counter,(inputs,targets) in enumerate(validds_itr):
+         # logger.info('validation batch %s',valid_batch_counter)
 
          inputs = inputs.to(device)
          targets = targets.to(device)
@@ -256,20 +256,22 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
 
          loss_value = loss(outputs,targets,endpoints,device)
          vloss.add_value(loss_value.item())
-         acc_value = acc(outputs,targets)
+         acc_value = acc(outputs,targets,device)
          vacc.add_value(acc_value.item())
+         
+         if valid_batch_counter > nval_tests:
+            break
 
+      # add validation to tensorboard
       if writer and rank == 0:
          global_batch = epoch * len(trainds) + batch_counter
-         writer.add_scalars('loss',{'valid':loss_value.item()},global_batch)
-         writer.add_scalars('accuracy',{'valid':acc_value.item()},global_batch)
-
-      if valid_batch_counter > nval_tests:
-         break
+         writer.add_scalars('loss',{'valid':vloss.calc_mean()},global_batch)
+         writer.add_scalars('accuracy',{'valid':vacc.calc_mean()},global_batch)
          
-      logger.info('>[%3d of %3d, %5d of %5d]<<< valid loss: %6.4f valid acc: %6.4f >>>',epoch + 1,epochs,batch_counter,len(trainds),vloss.calc_mean(),vacc.calc_mean())
+      logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),vloss.calc_mean(),vacc.calc_mean(),valid_batch_counter+1)
 
       model.train()
+
 
 
 def valid_model(self,validds,config):
