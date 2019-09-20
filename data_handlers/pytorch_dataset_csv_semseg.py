@@ -17,6 +17,7 @@ class CSVDataset(td.Dataset):
       self.class_ids    = config['data_handling']['class_nums']
       self.filelist     = filelist
       if batch_limiter is not None:
+         logger.info('limiting filelist size to %s',batch_limiter)
          self.filelist = filelist[:batch_limiter]
       self.len          = len(self.filelist)
       # self.col_names    = ['id', 'index', 'x', 'y', 'z', 'eta', 'phi','r','Et','pid','true_pt']
