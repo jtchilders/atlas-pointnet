@@ -108,7 +108,27 @@ def pixel_wise_accuracy(pred,targets,device='cpu'):
    return acc
 
 
-def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu'):
+def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu',reg_weight=0.001):
+
+   # pred.shape = [N_batch, N_class, N_points]
+   # targets.shape = [N_batch,N_points]
+
+   classify_loss = torch.nn.CrossEntropyLoss()(pred,targets.long())
+
+   # Enforce the transformation as orthogonal matrix
+   feature_trans = endpoints['feature_trans']  # BxKxK
+   K = feature_trans.shape[1]
+   mat_diff = feature_trans.matmul(feature_trans.transpose(2,1))
+   mat_diff -= torch.tensor(np.eye(K), dtype=torch.float32)
+
+   mat_diff_loss = torch.sum(mat_diff ** 2) / 2.
+
+   combined_loss = classify_loss + mat_diff_loss * reg_weight
+
+   return combined_loss
+
+
+def pixel_wise_cross_entryA(pred,targets,endpoints,device='cpu'):
    # for semantic segmentation, need to compare class
    # prediction for each point AND need to weight by the
    # number of pixels for each point
@@ -130,8 +150,22 @@ def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu'):
 
    loss = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weights))
 
+   losses = []
+   for point in range(targets.shape[1]):
+      l = loss(pred[:,:,point],targets[:,point].long())
+      #logger.info('l = %s',l)
+      losses.append(l.tolist())
+
+   losses_value = np.mean(np.array(losses))
+
    loss_value = loss(pred,targets.long())
-   logger.info(' pred[0,...,0] = %s targets[0,0] = %s loss = %s',pred[0,...,0],targets[0,0],loss_value)
+
+   loss = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weights),reduction='none')
+
+   loss_value2 = loss(pred,targets.long())
+
+
+   logger.info(' loss = %s loss2 = %s losses = %s',loss_value,loss_value2.mean(),losses_value)
 
    return loss_value
 

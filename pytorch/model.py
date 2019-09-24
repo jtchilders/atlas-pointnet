@@ -3,7 +3,7 @@ import pytorch.loss as losses
 import numpy as np
 from sklearn.metrics import confusion_matrix
 import torch,logging,time
-import CalcMean
+import CalcMean,psutil
 logger = logging.getLogger(__name__)
 #torch.set_printoptions(sci_mode=False,precision=3)
 
@@ -150,6 +150,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          end_data = time.time()
 
          # logger.info('inputs: %s targets: %s',inputs.shape,targets.shape)
+         # logger.info('inputs: %s targets: %s',inputs[0,...,0],targets[0,0])
 
          if inputs.shape[0] != batch_size:
             logger.warning('input has incorrect batch size: %s',inputs.shape)
@@ -170,6 +171,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          # logger.debug('zeroed opt')
          start_forward = time.time()
          outputs,endpoints = model(inputs)
+         # logger.info('outputs = %s targets = %s',torch.nn.Softmax(dim=1)(outputs)[0,...,0],targets[0,0])
          end_forward = time.time()
          # logger.debug('got outputs: %s targets: %s',outputs,targets)
 
@@ -208,6 +210,10 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
             mean_img_per_second = 1. / mean_img_per_second
             
             logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f move time: %6.3f forward time: %6.3f loss time: %6.3f  backward time: %6.3f acc time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),monitor_acc.calc_mean(),mean_img_per_second,data_time.calc_mean(),move_time.calc_mean(),forward_time.calc_mean(),acc_time.calc_mean(),backward_time.calc_mean(),acc_time.calc_mean(),batch_time.calc_mean())
+            mem = psutil.virtual_memory()
+            logger.info('<[%3d of %3d, %5d of %5d]> cpu usage: %s mem total: %s mem free: %s (%4.1f%%)',
+               epoch + 1,epochs,batch_counter,len(trainds),psutil.cpu_percent(),mem.total,
+               mem.free,mem.free / mem.total * 100.)
             # logger.info('running count = %s',trainds.running_class_count)
             # logger.info('prediction = %s',torch.nn.Softmax(dim=1)(outputs))
 

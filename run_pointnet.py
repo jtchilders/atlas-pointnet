@@ -97,7 +97,6 @@ def main():
    logger.info('horovod:            %s',args.horovod)
    logger.info('logdir:             %s',args.logdir)
    logger.info('batch_limiter:      %s',args.batch_limiter)
-   logger.info('num_threads:        %s',torch.get_num_threads())
    logger.info('filelist_base:      %s',args.filelist_base)
    logger.info('flops:              %s',args.flops)
 
@@ -143,6 +142,9 @@ def main():
    logger.info('building model')
    if 'pytorch' in config_file['model']['framework']:
       from pytorch import model,loss
+      import torch
+      logger.info('num_threads:        %s',torch.get_num_threads())
+      torch.manual_seed(args.random_seed)
 
       net = model.get_model(config_file)
       if hasattr(trainds,'dataset') and hasattr(net,'output_grid'):

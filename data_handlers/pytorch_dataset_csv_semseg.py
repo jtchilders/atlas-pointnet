@@ -53,8 +53,14 @@ class CSVDataset(td.Dataset):
             input = input[['eta','phi','r','Et']]
          else:
             input = self.data[['eta','phi','r','Et']]
+
+         # init_length = len(input)
+         input = input.to_numpy()
+         # logger.info('input init_length = %s',init_length)
+         # logger.info('input[0] = %s',input[0])
          
          input = np.tile(input,(int(self.img_shape[0] / input.shape[0]) + 1,1))[:self.img_shape[0],...]
+         # logger.info('input[%s] = %s',init_length,input[init_length])
          input = np.float32(input.transpose())
          # logger.info('input = %s',input.shape)
          return input
@@ -64,12 +70,13 @@ class CSVDataset(td.Dataset):
    def get_target(self):
       if hasattr(self,'data'):
          target = self.data['pid']
-         # logger.info('target = %s',target.shape)
+         # init_length = len(target)
+         # logger.info('target[0:5] = %s',target.to_numpy()[0:5])
+         # logger.info('map = %s',self.class_map)
          target = target.map(self.class_map)
-         # logger.info('target map = %s',target.shape)
          target = np.tile(target,(int(self.img_shape[0] / target.shape[0]) + 1,))[:self.img_shape[0],...]
          target = np.int32(target)
-         # logger.info('target tiled = %s',target.shape)
+         # logger.info('target[%s] = %s',init_length,target[init_length-5:init_length+5])
          return torch.from_numpy(target)
       else:
          raise Exception('no data attribute')
