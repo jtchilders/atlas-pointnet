@@ -114,18 +114,23 @@ def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu',reg_weight=0.001)
    # targets.shape = [N_batch,N_points]
 
    classify_loss = torch.nn.CrossEntropyLoss()(pred,targets.long())
+   logger.info('classify_loss = %s',classify_loss)
 
    # Enforce the transformation as orthogonal matrix
-   feature_trans = endpoints['feature_trans']  # BxKxK
-   K = feature_trans.shape[1]
-   mat_diff = feature_trans.matmul(feature_trans.transpose(2,1))
-   mat_diff -= torch.tensor(np.eye(K), dtype=torch.float32)
+   # feature_trans = endpoints['feature_trans']  # BxKxK
+   # logger.info('feature_trans[0] = %s %s',torch.max(feature_trans[0]),torch.min(feature_trans[0]))
+   # K = feature_trans.shape[1]
+   # mat_diff = feature_trans.matmul(feature_trans.transpose(2,1))
 
-   mat_diff_loss = torch.sum(mat_diff ** 2) / 2.
+   # logger.info('mat_diff[0] = %s %s',torch.max(mat_diff[0]),torch.min(mat_diff[0]))
+   # mat_diff -= torch.tensor(np.eye(K), dtype=torch.float32)
 
-   combined_loss = classify_loss + mat_diff_loss * reg_weight
+   # mat_diff_loss = torch.sum(mat_diff ** 2) / 2.
+   # logger.info('mat_diff_loss = %s',mat_diff_loss)
 
-   return combined_loss
+   # combined_loss = classify_loss + mat_diff_loss * reg_weight
+
+   return classify_loss
 
 
 def pixel_wise_cross_entryA(pred,targets,endpoints,device='cpu'):
