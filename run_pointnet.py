@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse,logging,socket,json,sys,psutil,time
+import argparse,logging,socket,json,sys,psutil,time,os
 import numpy as np
 from data_handlers import utils as datautils
 import torch
@@ -10,9 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 def print_mem_cpu():
+   start = time.time()
    while True:
       mem = psutil.virtual_memory()
-      print('total mem = ' + str(mem.total) + ' free mem = ' + str(mem.free) + ' cpu usage = ' + str(psutil.cpu_percent()))
+      print(str(time.time()-start) + ' pid = ' + str(os.getpid()) + ' total mem = ' + str(mem.total) + ' free mem = ' + str(mem.free/mem.total*100.) + ' cpu usage = ' + str(psutil.cpu_percent()))
       time.sleep(1)
 
 
