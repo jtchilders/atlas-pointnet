@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
-import argparse,logging,socket,json,sys
+import argparse,logging,socket,json,sys,psutil,time
 import numpy as np
 from data_handlers import utils as datautils
 import torch
 import tensorboardX
+import multiprocessing as mp
 
 logger = logging.getLogger(__name__)
+
+
+def print_mem_cpu():
+   while True:
+      mem = psutil.virtual_memory()
+      print('total mem = ' + str(mem.total) + ' free mem = ' + str(mem.free) + ' cpu usage = ' + str(psutil.cpu_percent()))
+      time.sleep(1)
+
+
+memorymon = mp.Process(target=print_mem_cpu)
+memorymon.start()
 
 
 
