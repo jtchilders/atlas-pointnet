@@ -4,7 +4,7 @@
       "model":                         "pointnet1d_semseg",
       "input_to_feature":              [[4,64,false],[64,64,false]],
       "feature_to_pool":               [[64,64,false],[64,128,false],[128,1024,false]],
-      "dense_layers":                  [[1024,512,0.7,false,"relu"],[512,256,0.7,false,"relu"],[256,4,0,false,null]]
+      "dense_layers":                  [[1024,512,0.7,true,"relu"],[512,256,0.7,true,"relu"],[256,4,0,false,null]]
    },
    "optimizer": {
       "name":                          "adam",
@@ -23,8 +23,8 @@
       "evt_per_file":                  1,
       "image_shape":                   [15000,4],
       "shuffle":                       true,
-      "classes":                       ["none","jet","electron","muon"],
-      "class_nums":                    [99,0,11,13],
+      "classes":                       ["none","jet","electron","muon","tau"],
+      "class_nums":                    [99,0,11,13,15],
       "workers":                       0,
       "pool_size":                     5,
       "treat_cjet_as_ljet":            true,

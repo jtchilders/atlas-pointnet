@@ -4,12 +4,14 @@ logger = logging.getLogger(__name__)
 
 
 def get_filelist(config_file):
-   if 'train_glob' in config_file['data_handling'] and 'valid_glob' in config_file['data_handling']:
+   if config_file['valid_only'] and 'valid_json' in config_file['data_handling']:
+      return get_filelistC(config_file)
+   elif 'train_glob' in config_file['data_handling'] and 'valid_glob' in config_file['data_handling']:
       return get_filelistA(config_file)
    elif 'glob' in config_file['data_handling']:
       return get_filelistB(config_file)
    else:
-      raise Exception('must define "glob" or  "train_glob" AND "valid_glob" in the "data_handing" section of json config file')
+      raise Exception('must define ["glob"] OR ["train_glob" AND "valid_glob"] OR ["valid_json" AND --valid_only] in the "data_handing" section of json config file')
 
 
 def get_filelistA(config_file):
@@ -83,6 +85,11 @@ def get_filelistB(config_file):
    json.dump(valid_filelist,open(config_file['filelist_base'] + '.validlist','w'),indent=4, sort_keys=True)
    
    return train_filelist,valid_filelist
+
+
+def get_filelistC(config_file):
+   list = json.load(open(config_file['data_handling']['valid_json']))
+   return list,list
 
 
 def get_shard(config_file,filelist):

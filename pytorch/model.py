@@ -279,8 +279,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
       model.train()
 
 
-
-def valid_model(self,validds,config):
+def valid_model(net,validds,config):
 
    batch_size = config['training']['batch_size']
    status = config['status']
@@ -291,50 +290,52 @@ def valid_model(self,validds,config):
    backward_time = CalcMean.CalcMean()
    batch_time = CalcMean.CalcMean()
 
-   self.eval()
-   self.to(device)
-   batch_counter = 0
+   net.eval()
+   net.to(device)
    start_data = time.time()
 
    confmat = np.zeros((nClasses,nClasses))
+
+   loss = losses.get_loss(config)
+   acc = losses.get_accuracy(config)
    
    # some data handlers need a restart
-   if callable(getattr(validds,'start_epoch',None)):
+   if 'csv_pool' == config['data_handling']['input_format']:
       validds.start_epoch()
 
-   # get data iterator for validation
-   if callable(getattr(validds,'batch_gen',None)):
+      # get data iterator for validation
       logger.info('using batch_gen method for valid')
       validds_itr = iter(validds.batch_gen())
    else:
       validds_itr = validds
 
-   for batch_data in validds_itr:
+   for batch_counter,(inputs,targets) in enumerate(validds_itr):
       logger.debug('got validation batch %s',batch_counter)
       
-      inputs = batch_data[0].to(device)
-      targets = batch_data[1].to(device)
+      inputs = inputs.to(device)
+      targets = targets.to(device)
 
       logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
 
       start_forward = time.time()
 
       logger.debug('zeroed opt')
-      outputs,endpoints = self(inputs)
-      logger.debug('got outputs: %s targets: %s',outputs,targets)
+      pred,_ = net(inputs)
+      logger.info('got pred: %s targets: %s',pred.shape,targets.shape)
 
-      # logger.info('>> pred = %s targets = %s',pred,targets)
-      outputs = torch.softmax(outputs,dim=1)
-      # logger.info('gt = %s',pred)
-      pred = outputs.argmax(dim=1).float()
-      # logger.info('argmax = %s',pred)
+      logger.info(' pred = %s targets = %s',pred[0,:,0],targets[0,0])
+      pred = torch.softmax(pred,dim=1)
+      logger.info('softmax = %s',pred[0,:,0])
+      pred = pred.argmax(dim=1).float()
+      logger.info('argmax = %s',pred[0,0])
 
       eq = torch.eq(pred,targets.float())
-      # logger.info('eq = %s',eq)
+      logger.info('eq = %s',eq[0,0])
 
-      accuracy = torch.sum(eq).float() / float(targets.shape[0])
+      accuracy = torch.sum(eq).float() / float(targets.shape.numel())
+      logger.info('acc = %s',accuracy)
       try:
-         batch_confmat = confusion_matrix(pred,targets,labels=range(len(config['data_handling']['classes'])))
+         batch_confmat = confusion_matrix(pred.reshape(-1),targets.reshape(-1),labels=range(len(config['data_handling']['classes'])))
          confmat += batch_confmat
       except:
          logger.exception('error batch_confmat = \n %s confmat = \n %s pred = \n %s targets = \n%s',batch_confmat,confmat,pred,targets)

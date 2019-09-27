@@ -17,8 +17,6 @@ def print_mem_cpu():
       time.sleep(1)
 
 
-memorymon = mp.Process(target=print_mem_cpu)
-memorymon.start()
 
 
 
@@ -51,6 +49,8 @@ def main():
 
    parser.add_argument('--horovod',default=False, action='store_true', help="Setup for distributed training")
 
+   parser.add_argument('--mem_mon',default=False, action='store_true', help="spawn subprocess to monitor memory")
+
    parser.add_argument('--filelist_base',default='filelist',help='base filename for the output filelists')
 
    parser.add_argument('--flops',default=False,action='store_true',help='if you have module "flops-counter.pytorch" installed, this will try to give you a flops count for the model.')
@@ -72,6 +72,7 @@ def main():
    elif not args.debug and not args.error and args.warning:
       log_level = logging.WARNING
 
+
    rank = 0
    nranks = 1
    hvd = None
@@ -83,6 +84,10 @@ def main():
       rank = hvd.rank()
       nranks = hvd.size()
       logging_format = '%(asctime)s %(levelname)s:' + '{:05d}'.format(rank) + ':%(name)s:%(process)s:%(thread)s:%(message)s'
+
+   if rank == 0 and args.mem_mon:
+      memorymon = mp.Process(target=print_mem_cpu)
+      memorymon.start()
 
    if rank > 0 and log_level == logging.INFO:
       log_level = logging.WARNING
@@ -184,9 +189,14 @@ def main():
       logger.info('trainable parameters: %s',total_params)
 
       if args.valid_only:
-         model.valid_model(validds,config_file)
+         model.valid_model(net,validds,config_file)
       else:
          model.train_model(net,opt,lrsched,trainds,validds,config_file,writer)
+
+
+   if rank == 0 and args.mem_mon:
+      memorymon.kill()
+      
             
 
 def print_module(module,input_shape,input_channels,name=None,indent=0):
