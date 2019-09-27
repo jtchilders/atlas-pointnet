@@ -38,6 +38,10 @@ def get_loss(config):
       global class_ids
       class_ids = config['data_handling']['class_nums']
       return pixel_wise_cross_entry
+   elif 'pixelwise_crossentropy_weighted' in loss_config['func']:
+      global class_ids
+      class_ids = config['data_handling']['class_nums']
+      return pixelwise_crossentropy_weighted
    else:
       raise Exception('%s loss function is not recognized' % loss_config['func'])
 
@@ -132,8 +136,18 @@ def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu',reg_weight=0.001)
 
    return classify_loss
 
+def pixelwise_crossentropy_focal(pred,targets,endpoints,device='cpu',reg_weight=0.001):
 
-def pixel_wise_cross_entryA(pred,targets,endpoints,device='cpu'):
+   # pred.shape = [N_batch, N_class, N_points]
+   # targets.shape = [N_batch,N_points]
+
+   classify_loss = torch.nn.CrossEntropyLoss()(pred,targets.long())
+   logger.info('classify_loss = %s',classify_loss)
+
+   return classify_loss
+
+
+def pixelwise_crossentropy_weighted(pred,targets,endpoints,device='cpu'):
    # for semantic segmentation, need to compare class
    # prediction for each point AND need to weight by the
    # number of pixels for each point
@@ -153,24 +167,7 @@ def pixel_wise_cross_entryA(pred,targets,endpoints,device='cpu'):
 
    logger.info('weights = %s',weights)
 
-   loss = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weights))
-
-   losses = []
-   for point in range(targets.shape[1]):
-      l = loss(pred[:,:,point],targets[:,point].long())
-      #logger.info('l = %s',l)
-      losses.append(l.tolist())
-
-   losses_value = np.mean(np.array(losses))
-
-   loss_value = loss(pred,targets.long())
-
-   loss = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weights),reduction='none')
-
-   loss_value2 = loss(pred,targets.long())
-
-
-   logger.info(' loss = %s loss2 = %s losses = %s',loss_value,loss_value2.mean(),losses_value)
+   loss_value = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weights))(pred,targets.long())
 
    return loss_value
 
