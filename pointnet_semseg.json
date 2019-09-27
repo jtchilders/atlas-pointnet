@@ -14,7 +14,7 @@
       "lrsched_gamma":                 0.75
    },
    "loss": {
-      "func":                          "pixel_wise_cross_entry"
+      "func":                          "pixelwise_crossentropy_weighted"
    },
    "data_handling": {
       "input_format":                  "dataset_csv_semseg",

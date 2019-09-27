@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 class_ids = []
 def get_loss(config):
-
+   global class_ids
    if 'loss' not in config:
       raise Exception('must include "loss" section in config file')
 
@@ -35,11 +35,9 @@ def get_loss(config):
    if 'pointnet_class_loss' in loss_config['func']:
       return pointnet_class_loss
    elif 'pixel_wise_cross_entry' in loss_config['func']:
-      global class_ids
       class_ids = config['data_handling']['class_nums']
       return pixel_wise_cross_entry
    elif 'pixelwise_crossentropy_weighted' in loss_config['func']:
-      global class_ids
       class_ids = config['data_handling']['class_nums']
       return pixelwise_crossentropy_weighted
    else:
@@ -50,7 +48,7 @@ def get_accuracy(config):
    if 'CrossEntropyLoss' in config['loss']['func'] or 'pointnet_class_loss' in config['loss']['func']:
       
       return multiclass_acc
-   if 'pixel_wise_cross_entry' in config['loss']['func']:
+   if config['loss']['func'] in ['pixel_wise_cross_entry','pixelwise_crossentropy_weighted']:
       return pixel_wise_accuracy
    else:
       if 'func' not in config['model']:
@@ -118,7 +116,7 @@ def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu',reg_weight=0.001)
    # targets.shape = [N_batch,N_points]
 
    classify_loss = torch.nn.CrossEntropyLoss()(pred,targets.long())
-   logger.info('classify_loss = %s',classify_loss)
+   # logger.info('classify_loss = %s',classify_loss)
 
    # Enforce the transformation as orthogonal matrix
    # feature_trans = endpoints['feature_trans']  # BxKxK
@@ -136,13 +134,21 @@ def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu',reg_weight=0.001)
 
    return classify_loss
 
+
 def pixelwise_crossentropy_focal(pred,targets,endpoints,device='cpu',reg_weight=0.001):
 
    # pred.shape = [N_batch, N_class, N_points]
    # targets.shape = [N_batch,N_points]
 
+   weights = []
+   for i in range(len(class_ids)):
+      weights.append((targets == i).sum())
+   weights = torch.Tensor(weights)
+   weights = weights.sum() / weights
+   weights[weights == float('Inf')] = 0
+
    classify_loss = torch.nn.CrossEntropyLoss()(pred,targets.long())
-   logger.info('classify_loss = %s',classify_loss)
+   # logger.info('classify_loss = %s',classify_loss)
 
    return classify_loss
 
@@ -165,7 +171,7 @@ def pixelwise_crossentropy_weighted(pred,targets,endpoints,device='cpu'):
    weights = weights.sum() / weights
    weights[weights == float('Inf')] = 0
 
-   logger.info('weights = %s',weights)
+   # logger.info('weights = %s',weights)
 
    loss_value = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weights))(pred,targets.long())
 
