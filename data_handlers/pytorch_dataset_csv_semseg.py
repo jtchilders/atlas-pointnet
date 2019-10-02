@@ -44,7 +44,7 @@ class CSVDataset(td.Dataset):
          logger.exception('exception received when opening file %s',filename)
          raise
 
-      return (self.get_input(),self.get_target())
+      return self.get_input() + (self.get_target(),)
 
    def get_input(self):
       if hasattr(self,'data'):
@@ -54,16 +54,17 @@ class CSVDataset(td.Dataset):
          else:
             input = self.data[['eta','phi','r','Et']]
 
-         # init_length = len(input)
          input = input.to_numpy()
-         # logger.info('input init_length = %s',init_length)
-         # logger.info('input[0] = %s',input[0])
+
+         # create a weight vector with 1's where points exist and 0's where they do not
+         weights = np.zeros(self.img_shape[0],dtype=np.float32)
+         weights[0:input.shape[0]] = np.ones(input.shape[0],dtype=np.float32)
          
          input = np.tile(input,(int(self.img_shape[0] / input.shape[0]) + 1,1))[:self.img_shape[0],...]
          # logger.info('input[%s] = %s',init_length,input[init_length])
          input = np.float32(input.transpose())
          # logger.info('input = %s',input.shape)
-         return input
+         return input,weights
       else:
          raise Exception('no data attribute')
 
