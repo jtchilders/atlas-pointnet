@@ -146,7 +146,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
 
       model.train()
       start_data = time.time()
-      for batch_counter,(inputs,targets) in enumerate(trainds_itr):
+      for batch_counter,(inputs,weights,targets) in enumerate(trainds_itr):
          end_data = time.time()
 
          # logger.info('inputs: %s targets: %s',inputs.shape,targets.shape)
@@ -163,9 +163,9 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          # logger.debug('got training batch %s',batch_counter)
          start_move = end_data
          inputs = inputs.to(device)
+         weights = weights.to(device)
          targets = targets.to(device)
          end_move = time.time()
-
 
          opt.zero_grad()
          # logger.debug('zeroed opt')
@@ -176,7 +176,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          # logger.debug('got outputs: %s targets: %s',outputs,targets)
 
          start_loss = end_forward
-         loss_value = loss(outputs,targets,endpoints,device=device)
+         loss_value = loss(outputs,targets,endpoints,weights,device=device)
          end_loss = time.time()
          monitor_loss.add_value(loss_value)
          # logger.debug('got loss')
@@ -210,10 +210,10 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
             mean_img_per_second = 1. / mean_img_per_second
             
             logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f move time: %6.3f forward time: %6.3f loss time: %6.3f  backward time: %6.3f acc time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),monitor_acc.calc_mean(),mean_img_per_second,data_time.calc_mean(),move_time.calc_mean(),forward_time.calc_mean(),acc_time.calc_mean(),backward_time.calc_mean(),acc_time.calc_mean(),batch_time.calc_mean())
-            mem = psutil.virtual_memory()
-            logger.info('<[%3d of %3d, %5d of %5d]> cpu usage: %s mem total: %s mem free: %s (%4.1f%%)',
-               epoch + 1,epochs,batch_counter,len(trainds),psutil.cpu_percent(),mem.total,
-               mem.free,mem.free / mem.total * 100.)
+            # mem = psutil.virtual_memory()
+            # logger.info('<[%3d of %3d, %5d of %5d]> cpu usage: %s mem total: %s mem free: %s (%4.1f%%)',
+            #    epoch + 1,epochs,batch_counter,len(trainds),psutil.cpu_percent(),mem.total,
+            #    mem.free,mem.free / mem.total * 100.)
             # logger.info('running count = %s',trainds.running_class_count)
             # logger.info('prediction = %s',torch.nn.Softmax(dim=1)(outputs))
 
@@ -321,19 +321,19 @@ def valid_model(net,validds,config):
 
       logger.debug('zeroed opt')
       pred,_ = net(inputs)
-      logger.info('got pred: %s targets: %s',pred.shape,targets.shape)
+      logger.debug('got pred: %s targets: %s',pred.shape,targets.shape)
 
-      logger.info(' pred = %s targets = %s',pred[0,:,0],targets[0,0])
+      logger.debug(' pred = %s targets = %s',pred[0,:,0],targets[0,0])
       pred = torch.softmax(pred,dim=1)
-      logger.info('softmax = %s',pred[0,:,0])
+      logger.debug('softmax = %s',pred[0,:,0])
       pred = pred.argmax(dim=1).float()
-      logger.info('argmax = %s',pred[0,0])
+      logger.debug('argmax = %s',pred[0,0])
 
       eq = torch.eq(pred,targets.float())
-      logger.info('eq = %s',eq[0,0])
+      logger.debug('eq = %s',eq[0,0])
 
       accuracy = torch.sum(eq).float() / float(targets.shape.numel())
-      logger.info('acc = %s',accuracy)
+      logger.debug('acc = %s',accuracy)
       try:
          batch_confmat = confusion_matrix(pred.reshape(-1),targets.reshape(-1),labels=range(len(config['data_handling']['classes'])))
          confmat += batch_confmat
