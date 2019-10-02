@@ -141,11 +141,17 @@ def pixelwise_crossentropy_focal(pred,targets,endpoints,device='cpu',reg_weight=
    # targets.shape = [N_batch,N_points]
 
    weights = []
-   for i in range(len(class_ids)):
+   nclasses = len(class_ids)
+   npoints = targets.shape[1]
+   for i in range(nclasses):
       weights.append((targets == i).sum())
    weights = torch.Tensor(weights)
    weights = weights.sum() / weights
    weights[weights == float('Inf')] = 0
+
+   # tile weights to match predictions
+   tiled_weights = weights.view(-1,nclasses).repeat((npoints,1))
+
 
    classify_loss = torch.nn.CrossEntropyLoss()(pred,targets.long())
    # logger.info('classify_loss = %s',classify_loss)
@@ -153,7 +159,7 @@ def pixelwise_crossentropy_focal(pred,targets,endpoints,device='cpu',reg_weight=
    return classify_loss
 
 
-def pixelwise_crossentropy_weighted(pred,targets,endpoints,device='cpu'):
+def pixelwise_crossentropy_weighted(pred,targets,endpoints,weights=None,device='cpu'):
    # for semantic segmentation, need to compare class
    # prediction for each point AND need to weight by the
    # number of pixels for each point
@@ -164,16 +170,25 @@ def pixelwise_crossentropy_weighted(pred,targets,endpoints,device='cpu'):
    # targets.shape = [N_batch,N_points]
    # logger.info(f'pred = {pred.shape}  targets = {targets.shape}')
 
-   weights = []
+   nclasses = pred.shape[1]
+   npoints = targets.shape[1]
+   nbatch = targets.shape[0]
+
+   proportional_weights = []
    for i in range(len(class_ids)):
-      weights.append((targets == i).sum())
-   weights = torch.Tensor(weights)
-   weights = weights.sum() / weights
-   weights[weights == float('Inf')] = 0
+      proportional_weights.append((targets == i).sum())
+   proportional_weights = torch.Tensor(proportional_weights)
+   proportional_weights = proportional_weights.sum() / proportional_weights
+   proportional_weights[proportional_weights == float('Inf')] = 0
 
    # logger.info('weights = %s',weights)
 
-   loss_value = torch.nn.CrossEntropyLoss(weight=torch.Tensor(weights))(pred,targets.long())
+   loss_value = torch.nn.CrossEntropyLoss(weight=proportional_weights,reduction='none')(pred,targets.long())
+   # logger.info('loss_value = %s',loss_value.shape)
+   # logger.info('weights = %s',weights.shape)
+
+   loss_value = loss_value * weights
+   loss_value = torch.mean(loss_value)
 
    return loss_value
 
