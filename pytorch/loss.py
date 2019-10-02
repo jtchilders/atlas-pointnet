@@ -6,6 +6,8 @@ logger = logging.getLogger(__name__)
 class_ids = []
 def get_loss(config):
    global class_ids
+   class_ids = config['data_handling']['class_nums']
+
    if 'loss' not in config:
       raise Exception('must include "loss" section in config file')
 
@@ -14,7 +16,9 @@ def get_loss(config):
    if 'func' not in loss_config:
       raise Exception('must include "func" loss section in config file')
 
-   if 'CrossEntropyLoss' in loss_config['func']:
+   if loss_config['func'] in locals():
+      return locals(loss_config['func'])
+   elif 'CrossEntropyLoss' in loss_config['func']:
       weight = None
       if 'weight' in loss_config:
          weight = loss_config['loss_weight']
@@ -32,14 +36,7 @@ def get_loss(config):
          reduction = loss_config['loss_reduction']
 
       return torch.nn.CrossEntropyLoss(weight,size_average,ignore_index,reduce,reduction)
-   if 'pointnet_class_loss' in loss_config['func']:
-      return pointnet_class_loss
-   elif 'pixel_wise_cross_entry' in loss_config['func']:
-      class_ids = config['data_handling']['class_nums']
-      return pixel_wise_cross_entry
-   elif 'pixelwise_crossentropy_weighted' in loss_config['func']:
-      class_ids = config['data_handling']['class_nums']
-      return pixelwise_crossentropy_weighted
+   
    else:
       raise Exception('%s loss function is not recognized' % loss_config['func'])
 
@@ -135,28 +132,40 @@ def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu',reg_weight=0.001)
    return classify_loss
 
 
-def pixelwise_crossentropy_focal(pred,targets,endpoints,device='cpu',reg_weight=0.001):
+def pixelwise_crossentropy_focal(pred,targets,endpoints,weights,device='cpu',gamma=2.,alpha=1.):
 
    # pred.shape = [N_batch, N_class, N_points]
    # targets.shape = [N_batch,N_points]
 
-   weights = []
-   nclasses = len(class_ids)
+   nclasses = pred.shape[1]
    npoints = targets.shape[1]
-   for i in range(nclasses):
-      weights.append((targets == i).sum())
-   weights = torch.Tensor(weights)
-   weights = weights.sum() / weights
-   weights[weights == float('Inf')] = 0
+   nbatch = targets.shape[0]
 
-   # tile weights to match predictions
-   tiled_weights = weights.view(-1,nclasses).repeat((npoints,1))
+   model_out = torch.nn.LogSoftmax(dim=1)(pred)
+   ce = model_out * targets
 
+   focal_weight = targets * torch.pow(1 - model_out,gamma)
 
-   classify_loss = torch.nn.CrossEntropyLoss()(pred,targets.long())
-   # logger.info('classify_loss = %s',classify_loss)
+   focal_loss = focal_weight * alpha * ce * mask
 
-   return classify_loss
+   proportional_weights = []
+   for i in range(len(class_ids)):
+      proportional_weights.append((targets == i).sum())
+   proportional_weights = torch.Tensor(proportional_weights)
+   proportional_weights = proportional_weights.sum() / proportional_weights
+   proportional_weights[proportional_weights == float('Inf')] = 0
+
+   # logger.info('weights = %s',weights)
+
+   loss_value = torch.nn.CrossEntropyLoss(weight=proportional_weights,reduction='none')(pred,targets.long())
+   # logger.info('loss_value = %s',loss_value)
+   # logger.info('weights = %s',weights)
+
+   loss_value = loss_value * weights
+   # logger.info('loss_value = %s',loss_value)
+   loss_value = torch.mean(loss_value)
+
+   return loss_value
 
 
 def pixelwise_crossentropy_weighted(pred,targets,endpoints,weights=None,device='cpu'):
@@ -184,10 +193,11 @@ def pixelwise_crossentropy_weighted(pred,targets,endpoints,weights=None,device='
    # logger.info('weights = %s',weights)
 
    loss_value = torch.nn.CrossEntropyLoss(weight=proportional_weights,reduction='none')(pred,targets.long())
-   # logger.info('loss_value = %s',loss_value.shape)
-   # logger.info('weights = %s',weights.shape)
+   # logger.info('loss_value = %s',loss_value)
+   # logger.info('weights = %s',weights)
 
    loss_value = loss_value * weights
+   # logger.info('loss_value = %s',loss_value)
    loss_value = torch.mean(loss_value)
 
    return loss_value
