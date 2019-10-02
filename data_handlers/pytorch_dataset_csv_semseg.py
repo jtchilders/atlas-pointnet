@@ -55,15 +55,18 @@ class CSVDataset(td.Dataset):
             input = self.data[['eta','phi','r','Et']]
 
          input = input.to_numpy()
+         input = np.float32(input)
 
          # create a weight vector with 1's where points exist and 0's where they do not
          weights = np.zeros(self.img_shape[0],dtype=np.float32)
          weights[0:input.shape[0]] = np.ones(input.shape[0],dtype=np.float32)
+
+         padded_input = np.zeros(self.img_shape,dtype=np.float32)
+
+         padded_input[:input.shape[0],:] = input
+
+         input = padded_input.transpose()
          
-         input = np.tile(input,(int(self.img_shape[0] / input.shape[0]) + 1,1))[:self.img_shape[0],...]
-         # logger.info('input[%s] = %s',init_length,input[init_length])
-         input = np.float32(input.transpose())
-         # logger.info('input = %s',input.shape)
          return input,weights
       else:
          raise Exception('no data attribute')
@@ -75,10 +78,13 @@ class CSVDataset(td.Dataset):
          # logger.info('target[0:5] = %s',target.to_numpy()[0:5])
          # logger.info('map = %s',self.class_map)
          target = target.map(self.class_map)
-         target = np.tile(target,(int(self.img_shape[0] / target.shape[0]) + 1,))[:self.img_shape[0],...]
-         target = np.int32(target)
+         target = np.int32(target.to_numpy())
+
+         padded_target = np.zeros(self.img_shape[0],dtype=np.int32)
+         padded_target[:target.shape[0]] = target
+
          # logger.info('target[%s] = %s',init_length,target[init_length-5:init_length+5])
-         return torch.from_numpy(target)
+         return torch.from_numpy(padded_target)
       else:
          raise Exception('no data attribute')
 
