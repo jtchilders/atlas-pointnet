@@ -192,15 +192,16 @@ def pixelwise_crossentropy_focal(pred,targets,endpoints,weights,device='cpu',gam
    pred = pred.transpose(1,2)  # [N_batch,N_points,N_class]
    pred = pred.contiguous().view(-1,nclasses)  # [N_batch*N_points,N_class]
 
-   targets = targets.view(-1,1).long()  # [N_batch*N_points,1]
-   weights = weights.view(-1,1)
+   # targets = targets.view(-1,1).long()  # [N_batch*N_points,1]
+   # logger.info('targets = %s',targets.shape)
+   weights = weights.view(-1)
 
    logpt = torch.nn.functional.log_softmax(pred,dim=1)  # [N_batch*N_points,N_class]
-   logpt = logpt.gather(1,targets)  # [N_batch*N_points,1]
+   logpt = logpt.gather(1,targets.view(-1,1).long())  # [N_batch*N_points,1]
    logpt = logpt.view(-1)
    pt = torch.autograd.Variable(logpt.data.exp())
 
-   loss = -1 * (1-pt)**gamma * logpt * weights
+   loss = -1 * (1 - pt) ** gamma * logpt * weights
 
    return loss.mean()
 
