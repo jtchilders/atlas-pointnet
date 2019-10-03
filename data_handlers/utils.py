@@ -123,22 +123,29 @@ def get_datasets(config_file):
    elif 'dataset_csv_semseg' == config_file['data_handling']['input_format']:
       logger.info('using CSV Dataset data handler for semantic segmentation')
       from data_handlers.pytorch_dataset_csv_semseg import CSVDataset
+      
       logger.info('creating batch generators')
       traindss = CSVDataset(trainlist,config_file)
+      validdss = CSVDataset(validlist,config_file)
+      
       train_sampler = None
       train_shuffle = config_file['data_handling']['shuffle']
+      valid_sampler = None
+      valid_shuffle = config_file['data_handling']['shuffle']
       if hvd is not None:
          import torch
          train_sampler = torch.utils.data.distributed.DistributedSampler(traindss,num_replicas=nranks,rank=rank)
          train_shuffle = False
+         valid_sampler = torch.utils.data.distributed.DistributedSampler(validdss,num_replicas=nranks,rank=rank)
+         valid_shuffle = False
+      
       trainds = CSVDataset.get_loader(traindss,batch_size=config_file['training']['batch_size'],
                                       shuffle=train_shuffle,
                                       num_workers=config_file['data_handling']['workers'],
                                       sampler=train_sampler)
-      validdss = CSVDataset(validlist,config_file)
       validds = CSVDataset.get_loader(validdss,batch_size=config_file['training']['batch_size'],
-                                      shuffle=config_file['data_handling']['shuffle'],
-                                      num_workers=0)
+                                      shuffle=valid_shuffle,
+                                      num_workers=0,sampler=valid_sampler)
    elif 'dataset_csv' == config_file['data_handling']['input_format']:
       logger.info('using CSV Dataset data handler')
       from data_handlers.pytorch_dataset_csv import CSVDataset

@@ -252,15 +252,16 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
       vloss = CalcMean.CalcMean()
       vacc = CalcMean.CalcMean()
 
-      for valid_batch_counter,(inputs,targets) in enumerate(validds_itr):
-         # logger.info('validation batch %s',valid_batch_counter)
+      for valid_batch_counter,(inputs,weights,targets) in enumerate(validds_itr):
+         logger.info('validation batch %s of %s',valid_batch_counter,len(validds))
 
          inputs = inputs.to(device)
          targets = targets.to(device)
+         weights = weights.to(device)
 
          outputs,endpoints = model(inputs)
 
-         loss_value = loss(outputs,targets,endpoints,device)
+         loss_value = loss(outputs,targets,endpoints,weights,device)
          vloss.add_value(loss_value.item())
          acc_value = acc(outputs,targets,device)
          vacc.add_value(acc_value.item())
@@ -268,13 +269,21 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          if valid_batch_counter > nval_tests:
             break
 
+
+      mean_acc = vacc.calc_mean()
+      mean_loss = vloss.calc_mean()
+      if config['hvd'] is not None:
+         mean_acc  = config['hvd'].allreduce(torch.tensor([mean_acc]))
+         mean_loss = config['hvd'].allreduce(torch.tensor([mean_loss]))
+      
+
       # add validation to tensorboard
       if writer and rank == 0:
          global_batch = epoch * len(trainds) + batch_counter
-         writer.add_scalars('loss',{'valid':vloss.calc_mean()},global_batch)
-         writer.add_scalars('accuracy',{'valid':vacc.calc_mean()},global_batch)
+         writer.add_scalars('loss',{'valid':mean_loss},global_batch)
+         writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
          
-      logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),vloss.calc_mean(),vacc.calc_mean(),valid_batch_counter+1)
+      logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter+1)
 
       model.train()
 
