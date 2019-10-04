@@ -107,6 +107,35 @@ def pixel_wise_accuracy(pred,targets,device='cpu'):
    return acc
 
 
+def mean_class_iou(pred,targets,device='cpu'):
+
+   nclasses = pred.shape[1]
+   npoints = targets.shape[1]
+   nbatch = targets.shape[0]
+
+   targets_onehot = torch.LongTensor(nbatch,nclasses,npoints,device=device,requires_grad=False).zero_()
+   targets_onehot = targets_onehot.scatter_(1,targets.view(nbatch,1,npoints).long(),1).float()
+
+   iou = IoU_coeff(pred,targets_onehot,device=device)
+   logger.info('iou = %s',iou)
+
+   return iou
+
+
+def IoU_coeff(pred,targets,smooth=1,device='cpu'):
+   intersection = torch.abs(targets * pred).sum(dim=2).sum(dim=1)
+   union = targets.sum(dim=2).sum(dim=1) + pred.sum(dim=2).sum(dim=1) - intersection
+   iou = torch.mean((intersection + smooth) / (union + smooth), dim=0)
+   return iou
+
+
+def dice_coef(pred,targets,smooth=1,device='cpu'):
+   intersection = torch.sum(targets * pred, axis=[1,2,3])
+   union = torch.sum(targets, axis=[1,2,3]) + torch.sum(pred, axis=[1,2,3])
+   dice = torch.mean((2. * intersection + smooth) / (union + smooth), axis=0)
+   return dice
+
+
 def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu',reg_weight=0.001):
 
    # pred.shape = [N_batch, N_class, N_points]
