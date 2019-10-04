@@ -230,7 +230,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
                writer.add_scalars('accuracy',{'train':monitor_acc.calc_mean()},global_batch)
                if 'mean_class_iou' in config['loss']['acc']:
                   for i in range(nclasses):
-                     writer.add_scalars('accuracy_%s' % i,{'train':class_accuracy[i].calc_mean()},global_batch)
+                     writer.add_scalars('class_accuracy',{'train_%i' % i:class_accuracy[i].calc_mean()},global_batch)
                writer.add_scalar('image_per_second',mean_img_per_second,global_batch)
 
             monitor_loss = CalcMean.CalcMean()
@@ -300,7 +300,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
          if 'mean_class_iou' in config['loss']['acc']:
             for i in range(nclasses):
-               writer.add_scalars('accuracy_%s' % i,{'valid':vclass_acc[i].calc_mean()},global_batch)
+               writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].calc_mean()},global_batch)
          
       logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter+1)
       if 'mean_class_iou' in config['loss']['acc']:
