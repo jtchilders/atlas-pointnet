@@ -131,8 +131,8 @@ def IoU_coeff(pred,targets,smooth=1,device='cpu'):
    union = targets.sum(dim=2) + pred.sum(dim=2) - intersection
    # logger.info(' union = %s ',union)
    iou = torch.mean((intersection + smooth) / (union + smooth), dim=0)
-   logger.info(' iou = %s ',iou)
-   return iou.mean()
+   # logger.info(' iou = %s ',iou)
+   return iou
 
 
 def dice_coef(pred,targets,smooth=1,device='cpu'):
