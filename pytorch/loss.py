@@ -117,7 +117,7 @@ def mean_class_iou(pred,targets,device='cpu'):
    targets_onehot = targets_onehot.scatter_(1,targets.view(nbatch,1,npoints).long(),1).float()
 
    iou = IoU_coeff(pred,targets_onehot,device=device)
-   logger.info('iou = %s',iou)
+   # logger.info('iou = %s',iou)
 
    return iou
 
