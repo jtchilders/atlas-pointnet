@@ -253,9 +253,10 @@ def pixelwise_crossentropy_weighted(pred,targets,endpoints,weights=None,device='
    proportional_weights = []
    for i in range(len(class_ids)):
       proportional_weights.append((targets == i).sum())
-   proportional_weights = torch.Tensor(proportional_weights)
+   proportional_weights = torch.Tensor(proportional_weights).to(device)
    proportional_weights = proportional_weights.sum() / proportional_weights
    proportional_weights[proportional_weights == float('Inf')] = 0
+
 
    # logger.info('weights = %s',weights)
 
