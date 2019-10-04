@@ -113,7 +113,7 @@ def mean_class_iou(pred,targets,device='cpu'):
    npoints = targets.shape[1]
    nbatch = targets.shape[0]
 
-   targets_onehot = torch.LongTensor(nbatch,nclasses,npoints,device=device,requires_grad=False).zero_()
+   targets_onehot = torch.zeros(nbatch,nclasses,npoints,device=device,requires_grad=False)
    targets_onehot = targets_onehot.scatter_(1,targets.view(nbatch,1,npoints).long(),1).float()
 
    iou = IoU_coeff(pred,targets_onehot,device=device)
