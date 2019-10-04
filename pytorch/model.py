@@ -207,7 +207,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
 
          batch_counter += 1
 
-         del inputs,targets
+         del inputs,targets,weights
 
          # print statistics
          if batch_counter % status == 0:
@@ -235,6 +235,8 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
 
             monitor_loss = CalcMean.CalcMean()
             monitor_acc = CalcMean.CalcMean()
+            if 'mean_class_iou' in config['loss']['acc']:
+               class_accuracy = [CalcMean.CalcMean() for _ in classes]
 
          # periodically save the model
          if batch_counter % nsave == 0 and rank == 0:
