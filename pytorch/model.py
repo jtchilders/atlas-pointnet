@@ -216,7 +216,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
             
             logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f move time: %6.3f forward time: %6.3f loss time: %6.3f  backward time: %6.3f acc time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),monitor_acc.calc_mean(),mean_img_per_second,data_time.calc_mean(),move_time.calc_mean(),forward_time.calc_mean(),acc_time.calc_mean(),backward_time.calc_mean(),acc_time.calc_mean(),batch_time.calc_mean())
             if 'mean_class_iou' in config['loss']['acc']:
-               logger.info('<[%3d of %3d, %5d of %5d]> class accuracy: %s',epoch + 1,epochs,batch_counter,len(trainds),[x.calc_mean() for x in class_accuracy])
+               logger.info('<[%3d of %3d, %5d of %5d]> class accuracy: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in class_accuracy])
             # mem = psutil.virtual_memory()
             # logger.info('<[%3d of %3d, %5d of %5d]> cpu usage: %s mem total: %s mem free: %s (%4.1f%%)',
             #    epoch + 1,epochs,batch_counter,len(trainds),psutil.cpu_percent(),mem.total,
@@ -227,7 +227,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
             if writer and rank == 0:
                global_batch = epoch * len(trainds) + batch_counter
                writer.add_scalars('loss',{'train':monitor_loss.calc_mean()},global_batch)
-               writer.add_scalars('accuracy',{'train':acc_value.item()},global_batch)
+               writer.add_scalars('accuracy',{'train':monitor_acc.calc_mean()},global_batch)
                if 'mean_class_iou' in config['loss']['acc']:
                   for i in range(nclasses):
                      writer.add_scalars('accuracy_%s' % i,{'train':class_accuracy[i].calc_mean()},global_batch)
@@ -304,7 +304,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          
       logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter+1)
       if 'mean_class_iou' in config['loss']['acc']:
-         logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),[x.calc_mean() for x in vclass_acc])
+         logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in vclass_acc])
 
       model.train()
 
