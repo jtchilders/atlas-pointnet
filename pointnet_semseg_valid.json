@@ -1,0 +1,39 @@
+{
+   "model": {
+      "framework":                     "pytorch",
+      "model":                         "pointnet1d_semseg",
+      "input_to_feature":              [[4,64,false],[64,64,false]],
+      "feature_to_pool":               [[64,64,false],[64,128,false],[128,1024,false]],
+      "dense_layers":                  [[1024,512,0.7,true,"relu"],[512,256,0.7,true,"relu"],[256,4,0,false,null]]
+   },
+   "optimizer": {
+      "name":                          "adam",
+      "lr":                            0.001,
+      "lrsched":                       "StepLR",
+      "lrsched_step_size":             400,
+      "lrsched_gamma":                 0.75
+   },
+   "loss": {
+      "func":                          "pixelwise_crossentropy_focal",
+      "acc":                           "mean_class_iou"
+   },
+   "data_handling": {
+      "input_format":                  "dataset_csv_semseg",
+      "valid_json":                    "/Users/jchilders/git/atlas-pointnet/filelist.txt",
+      "train_fraction":                0.9,
+      "evt_per_file":                  1,
+      "image_shape":                   [15000,4],
+      "shuffle":                       true,
+      "classes":                       ["none","jet","electron","muon","tau"],
+      "class_nums":                    [99,0,11,13,15],
+      "workers":                       0,
+      "pool_size":                     5,
+      "treat_cjet_as_ljet":            true,
+      "queue_depth":                   20
+   },
+   "training": {
+      "batch_size":                    10,
+      "epochs":                        10,
+      "steps_per_valid":               2
+   }
+}
