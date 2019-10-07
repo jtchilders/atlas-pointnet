@@ -2,7 +2,7 @@ import pytorch.optimizer as opt
 import pytorch.loss as losses
 import numpy as np
 from sklearn.metrics import confusion_matrix
-import torch,logging,time
+import torch,logging,time,json
 import CalcMean,psutil
 logger = logging.getLogger(__name__)
 #torch.set_printoptions(sci_mode=False,precision=3)
@@ -122,6 +122,8 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
    monitor_loss = CalcMean.CalcMean()
    monitor_acc = CalcMean.CalcMean()
 
+   loss_gammas = [0,1,2,2,3,3,4,4,5,5]
+
    valid_batch_counter = 0
    for epoch in range(epochs):
       logger.info(' epoch %s of %s',epoch,epochs)
@@ -143,6 +145,11 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          logging.info('learning rate: %s',param_group['lr'])
          if writer:
             writer.add_scalar('learning_rate',param_group['lr'],epoch)
+
+      if epoch < len(loss_gammas):
+         loss_gamma = loss_gammas[epoch]
+      else:
+         loss_gamma = loss_gammas[-1]
 
       model.train()
       start_data = time.time()
@@ -176,7 +183,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          # logger.debug('got outputs: %s targets: %s',outputs,targets)
 
          start_loss = end_forward
-         loss_value = loss(outputs,targets,endpoints,weights,device=device)
+         loss_value = loss(outputs,targets,endpoints,weights,device=device,gamma=loss_gamma)
          end_loss = time.time()
          monitor_loss.add_value(loss_value)
          # logger.debug('got loss')
@@ -287,6 +294,8 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          if valid_batch_counter > nval_tests:
             break
 
+         del inputs,targets,weights
+
 
       mean_acc = vacc.calc_mean()
       mean_loss = vloss.calc_mean()
@@ -341,33 +350,35 @@ def valid_model(net,validds,config):
    else:
       validds_itr = validds
 
-   for batch_counter,(inputs,targets) in enumerate(validds_itr):
-      logger.debug('got validation batch %s',batch_counter)
+   for batch_counter,(inputs,weights,targets) in enumerate(validds_itr):
+      # logger.debug('got validation batch %s',batch_counter)
       
       inputs = inputs.to(device)
       targets = targets.to(device)
+      weights = weights.to(device)
 
-      logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
+      # logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
 
       start_forward = time.time()
 
-      logger.debug('zeroed opt')
+      # logger.debug('zeroed opt')
       pred,_ = net(inputs)
-      logger.debug('got pred: %s targets: %s',pred.shape,targets.shape)
+      # logger.debug('got pred: %s targets: %s',pred.shape,targets.shape)
 
-      logger.debug(' pred = %s targets = %s',pred[0,:,0],targets[0,0])
-      pred = torch.softmax(pred,dim=1)
-      logger.debug('softmax = %s',pred[0,:,0])
-      pred = pred.argmax(dim=1).float()
-      logger.debug('argmax = %s',pred[0,0])
+      # logger.debug(' pred = %s targets = %s',pred[0,:,0],targets[0,0])
+      accuracy = acc(pred,targets)
+      if 'mean_class_iou' in config['loss']['acc']:
+         class_accuracy = accuracy
+         accuracy = accuracy.mean()
 
-      eq = torch.eq(pred,targets.float())
-      logger.debug('eq = %s',eq[0,0])
-
-      accuracy = torch.sum(eq).float() / float(targets.shape.numel())
-      logger.debug('acc = %s',accuracy)
+      # logger.debug('acc = %s',accuracy)
       try:
-         batch_confmat = confusion_matrix(pred.reshape(-1),targets.reshape(-1),labels=range(len(config['data_handling']['classes'])))
+         tmp_pred = pred.transpose(1,2).contiguous().view(-1,nClasses)
+         tmp_pred = torch.nn.functional.softmax(tmp_pred,dim=1)
+         tmp_pred = torch.argmax(tmp_pred,dim=1).view(-1)
+         tmp_target = targets.view(-1)
+         logger.info('tmp_pred = %s tmp_target = %s',tmp_pred.shape,tmp_target.shape)
+         batch_confmat = confusion_matrix(tmp_pred.reshape(-1),tmp_target.reshape(-1),labels=range(len(config['data_handling']['classes'])))
          confmat += batch_confmat
       except:
          logger.exception('error batch_confmat = \n %s confmat = \n %s pred = \n %s targets = \n%s',batch_confmat,confmat,pred,targets)
@@ -380,12 +391,17 @@ def valid_model(net,validds,config):
 
       batch_counter += 1
 
+      mean_acc = accuracy
+      if config['hvd'] is not None:
+         mean_acc  = config['hvd'].allreduce(torch.tensor([accuracy]))
+         confmat = config['hvd'].allreduce(torch.tensor(confmat)).numpy()
+
       # print statistics
       if config['rank'] == 0 and batch_counter % status == 0:
          mean_img_per_second = (forward_time.calc_mean() + backward_time.calc_mean()) / batch_size
          mean_img_per_second = 1. / mean_img_per_second
          
-         logger.info('<[%5d of %5d]> valid accuracy: %6.4f images/sec: %6.2f   data time: %6.3f  forward time: %6.3f confmat = %s',batch_counter,len(validds),accuracy,mean_img_per_second,data_time.calc_mean(),forward_time.calc_mean(),confmat)
-         logger.info('prediction = %s',pred)
+         logger.info('<[%5d of %5d]> valid accuracy: %6.4f images/sec: %6.2f   data time: %6.3f  forward time: %6.3f confmat = %s',batch_counter,len(validds),mean_acc,mean_img_per_second,data_time.calc_mean(),forward_time.calc_mean(),json.dumps(confmat.tolist()))
+         # logger.info('prediction = %s',pred)
 
       start_data = time.time()
