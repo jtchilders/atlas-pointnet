@@ -107,6 +107,42 @@ def pixel_wise_accuracy(pred,targets,device='cpu'):
    return acc
 
 
+def mean_class_iou(pred,targets,device='cpu'):
+
+   nclasses = pred.shape[1]
+   npoints = targets.shape[1]
+   nbatch = targets.shape[0]
+
+   targets_onehot = torch.zeros(nbatch,nclasses,npoints,device=device,requires_grad=False)
+   targets_onehot = targets_onehot.scatter_(1,targets.view(nbatch,1,npoints).long(),1).float()
+
+   pred = torch.nn.functional.softmax(pred,dim=1)
+
+   iou = IoU_coeff(pred,targets_onehot,device=device)
+   # logger.info('iou = %s',iou)
+
+   return iou
+
+
+def IoU_coeff(pred,targets,smooth=1,device='cpu'):
+   # logger.info(' pred = %s targets = %s',pred.shape,targets.shape)
+   intersection = torch.abs(targets * pred).sum(dim=2)
+   # logger.info(' intersection = %s ',intersection)
+   union = targets.sum(dim=2) + pred.sum(dim=2) - intersection
+   # logger.info(' union = %s ',union)
+   iou = torch.mean((intersection + smooth) / (union + smooth), dim=0)
+   # logger.info(' iou = %s ',iou)
+   return iou
+
+
+def dice_coef(pred,targets,smooth=1,device='cpu'):
+   intersection = (targets * pred).sum(dim=2)
+   union = targets.sum(dim=2) + pred.sum(dim=2)
+   dice = torch.mean((2. * intersection + smooth) / (union + smooth), dim=0)
+   logger.info(' dice = %s ',dice)
+   return dice.mean()
+
+
 def pixel_wise_cross_entry(pred,targets,endpoints,device='cpu',reg_weight=0.001):
 
    # pred.shape = [N_batch, N_class, N_points]
@@ -189,17 +225,25 @@ def pixelwise_crossentropy_focal(pred,targets,endpoints,weights,device='cpu',gam
    # npoints = targets.shape[1]
    # nbatch = targets.shape[0]
 
+   # logger.info('targets = %s',targets[0,0])
+   # logger.info('pred = %s',pred[0,...,0])
    pred = pred.transpose(1,2)  # [N_batch,N_points,N_class]
+   # logger.info('pred = %s',pred[0,0,...])
    pred = pred.contiguous().view(-1,nclasses)  # [N_batch*N_points,N_class]
+   # logger.info('pred = %s',pred[0])
 
    # targets = targets.view(-1,1).long()  # [N_batch*N_points,1]
    # logger.info('targets = %s',targets.shape)
    weights = weights.view(-1)
 
    logpt = torch.nn.functional.log_softmax(pred,dim=1)  # [N_batch*N_points,N_class]
+   # logger.info('logpt = %s',logpt[0])
    logpt = logpt.gather(1,targets.view(-1,1).long())  # [N_batch*N_points,1]
+   # logger.info('logpt = %s',logpt[0])
    logpt = logpt.view(-1)
+   # logger.info('logpt = %s',logpt[0])
    pt = torch.autograd.Variable(logpt.data.exp())
+   # logger.info('pt = %s',pt[0])
 
    loss = -1 * (1 - pt) ** gamma * logpt * weights
 
@@ -224,9 +268,10 @@ def pixelwise_crossentropy_weighted(pred,targets,endpoints,weights=None,device='
    proportional_weights = []
    for i in range(len(class_ids)):
       proportional_weights.append((targets == i).sum())
-   proportional_weights = torch.Tensor(proportional_weights)
+   proportional_weights = torch.Tensor(proportional_weights).to(device)
    proportional_weights = proportional_weights.sum() / proportional_weights
    proportional_weights[proportional_weights == float('Inf')] = 0
+
 
    # logger.info('weights = %s',weights)
 

@@ -2,7 +2,7 @@ import pytorch.optimizer as opt
 import pytorch.loss as losses
 import numpy as np
 from sklearn.metrics import confusion_matrix
-import torch,logging,time
+import torch,logging,time,json
 import CalcMean,psutil
 logger = logging.getLogger(__name__)
 #torch.set_printoptions(sci_mode=False,precision=3)
@@ -92,11 +92,11 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
    nsave = config['nsave']
    model_save = config['model_save']
    rank = config['rank']
-   # hvd = config['hvd']
 
-   # batch_limiter = None
-   # if 'batch_limiter' in config:
-   #    batch_limiter = config['batch_limiter']
+   if 'mean_class_iou' in config['loss']['acc']:
+      classes = config['data_handling']['classes']
+      nclasses = len(classes)
+      class_accuracy = [CalcMean.CalcMean() for _ in classes]
 
    # some data handlers need a restart
    if 'csv_pool' == config['data_handling']['input_format']:
@@ -122,6 +122,8 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
    monitor_loss = CalcMean.CalcMean()
    monitor_acc = CalcMean.CalcMean()
 
+   loss_gammas = [0,1,2,2,3,3,4,4,5,5]
+
    valid_batch_counter = 0
    for epoch in range(epochs):
       logger.info(' epoch %s of %s',epoch,epochs)
@@ -143,6 +145,11 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          logging.info('learning rate: %s',param_group['lr'])
          if writer:
             writer.add_scalar('learning_rate',param_group['lr'],epoch)
+
+      if epoch < len(loss_gammas):
+         loss_gamma = loss_gammas[epoch]
+      else:
+         loss_gamma = loss_gammas[-1]
 
       model.train()
       start_data = time.time()
@@ -176,14 +183,19 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          # logger.debug('got outputs: %s targets: %s',outputs,targets)
 
          start_loss = end_forward
-         loss_value = loss(outputs,targets,endpoints,weights,device=device)
+         loss_value = loss(outputs,targets,endpoints,weights,device=device,gamma=loss_gamma)
          end_loss = time.time()
          monitor_loss.add_value(loss_value)
          # logger.debug('got loss')
 
          start_acc = time.time()
          acc_value = acc(outputs,targets,device)
-         monitor_acc.add_value(acc_value)
+         if 'mean_class_iou' in config['loss']['acc']:
+            for i in range(nclasses):
+               class_accuracy[i].add_value(acc_value[i])
+            monitor_acc.add_value(acc_value.mean())
+         else:
+            monitor_acc.add_value(acc_value)
          end_acc = time.time()
 
          start_backward = end_acc
@@ -202,7 +214,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
 
          batch_counter += 1
 
-         del inputs,targets
+         del inputs,targets,weights
 
          # print statistics
          if batch_counter % status == 0:
@@ -210,6 +222,8 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
             mean_img_per_second = 1. / mean_img_per_second
             
             logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f move time: %6.3f forward time: %6.3f loss time: %6.3f  backward time: %6.3f acc time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),monitor_acc.calc_mean(),mean_img_per_second,data_time.calc_mean(),move_time.calc_mean(),forward_time.calc_mean(),acc_time.calc_mean(),backward_time.calc_mean(),acc_time.calc_mean(),batch_time.calc_mean())
+            if 'mean_class_iou' in config['loss']['acc']:
+               logger.info('<[%3d of %3d, %5d of %5d]> class accuracy: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in class_accuracy])
             # mem = psutil.virtual_memory()
             # logger.info('<[%3d of %3d, %5d of %5d]> cpu usage: %s mem total: %s mem free: %s (%4.1f%%)',
             #    epoch + 1,epochs,batch_counter,len(trainds),psutil.cpu_percent(),mem.total,
@@ -220,11 +234,16 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
             if writer and rank == 0:
                global_batch = epoch * len(trainds) + batch_counter
                writer.add_scalars('loss',{'train':monitor_loss.calc_mean()},global_batch)
-               writer.add_scalars('accuracy',{'train':acc_value.item()},global_batch)
+               writer.add_scalars('accuracy',{'train':monitor_acc.calc_mean()},global_batch)
+               if 'mean_class_iou' in config['loss']['acc']:
+                  for i in range(nclasses):
+                     writer.add_scalars('class_accuracy',{'train_%i' % i:class_accuracy[i].calc_mean()},global_batch)
                writer.add_scalar('image_per_second',mean_img_per_second,global_batch)
 
             monitor_loss = CalcMean.CalcMean()
             monitor_acc = CalcMean.CalcMean()
+            if 'mean_class_iou' in config['loss']['acc']:
+               class_accuracy = [CalcMean.CalcMean() for _ in classes]
 
          # periodically save the model
          if batch_counter % nsave == 0 and rank == 0:
@@ -251,6 +270,8 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
 
       vloss = CalcMean.CalcMean()
       vacc = CalcMean.CalcMean()
+      if 'mean_class_iou' in config['loss']['acc']:
+         vclass_acc = [CalcMean.CalcMean() for _ in range(nclasses)]
 
       for valid_batch_counter,(inputs,weights,targets) in enumerate(validds_itr):
          logger.info('validation batch %s of %s',valid_batch_counter,len(validds))
@@ -264,10 +285,16 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          loss_value = loss(outputs,targets,endpoints,weights,device)
          vloss.add_value(loss_value.item())
          acc_value = acc(outputs,targets,device)
-         vacc.add_value(acc_value.item())
+         if 'mean_class_iou' in config['loss']['acc']:
+            for i in range(nclasses):
+               vclass_acc[i].add_value(acc_value[i])
+         else:
+            vacc.add_value(acc_value.item())
          
          if valid_batch_counter > nval_tests:
             break
+
+         del inputs,targets,weights
 
 
       mean_acc = vacc.calc_mean()
@@ -282,8 +309,13 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          global_batch = epoch * len(trainds) + batch_counter
          writer.add_scalars('loss',{'valid':mean_loss},global_batch)
          writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
+         if 'mean_class_iou' in config['loss']['acc']:
+            for i in range(nclasses):
+               writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].calc_mean()},global_batch)
          
       logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter+1)
+      if 'mean_class_iou' in config['loss']['acc']:
+         logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in vclass_acc])
 
       model.train()
 
@@ -318,33 +350,35 @@ def valid_model(net,validds,config):
    else:
       validds_itr = validds
 
-   for batch_counter,(inputs,targets) in enumerate(validds_itr):
-      logger.debug('got validation batch %s',batch_counter)
+   for batch_counter,(inputs,weights,targets) in enumerate(validds_itr):
+      # logger.debug('got validation batch %s',batch_counter)
       
       inputs = inputs.to(device)
       targets = targets.to(device)
+      weights = weights.to(device)
 
-      logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
+      # logger.debug('inputs: %s targets: %s',inputs.shape,targets.shape)
 
       start_forward = time.time()
 
-      logger.debug('zeroed opt')
+      # logger.debug('zeroed opt')
       pred,_ = net(inputs)
-      logger.debug('got pred: %s targets: %s',pred.shape,targets.shape)
+      # logger.debug('got pred: %s targets: %s',pred.shape,targets.shape)
 
-      logger.debug(' pred = %s targets = %s',pred[0,:,0],targets[0,0])
-      pred = torch.softmax(pred,dim=1)
-      logger.debug('softmax = %s',pred[0,:,0])
-      pred = pred.argmax(dim=1).float()
-      logger.debug('argmax = %s',pred[0,0])
+      # logger.debug(' pred = %s targets = %s',pred[0,:,0],targets[0,0])
+      accuracy = acc(pred,targets)
+      if 'mean_class_iou' in config['loss']['acc']:
+         class_accuracy = accuracy
+         accuracy = accuracy.mean()
 
-      eq = torch.eq(pred,targets.float())
-      logger.debug('eq = %s',eq[0,0])
-
-      accuracy = torch.sum(eq).float() / float(targets.shape.numel())
-      logger.debug('acc = %s',accuracy)
+      # logger.debug('acc = %s',accuracy)
       try:
-         batch_confmat = confusion_matrix(pred.reshape(-1),targets.reshape(-1),labels=range(len(config['data_handling']['classes'])))
+         tmp_pred = pred.transpose(1,2).contiguous().view(-1,nClasses)
+         tmp_pred = torch.nn.functional.softmax(tmp_pred,dim=1)
+         tmp_pred = torch.argmax(tmp_pred,dim=1).view(-1)
+         tmp_target = targets.view(-1)
+         logger.info('tmp_pred = %s tmp_target = %s',tmp_pred.shape,tmp_target.shape)
+         batch_confmat = confusion_matrix(tmp_pred.reshape(-1),tmp_target.reshape(-1),labels=range(len(config['data_handling']['classes'])))
          confmat += batch_confmat
       except:
          logger.exception('error batch_confmat = \n %s confmat = \n %s pred = \n %s targets = \n%s',batch_confmat,confmat,pred,targets)
@@ -357,12 +391,17 @@ def valid_model(net,validds,config):
 
       batch_counter += 1
 
+      mean_acc = accuracy
+      if config['hvd'] is not None:
+         mean_acc  = config['hvd'].allreduce(torch.tensor([accuracy]))
+         confmat = config['hvd'].allreduce(torch.tensor(confmat)).numpy()
+
       # print statistics
       if config['rank'] == 0 and batch_counter % status == 0:
          mean_img_per_second = (forward_time.calc_mean() + backward_time.calc_mean()) / batch_size
          mean_img_per_second = 1. / mean_img_per_second
          
-         logger.info('<[%5d of %5d]> valid accuracy: %6.4f images/sec: %6.2f   data time: %6.3f  forward time: %6.3f confmat = %s',batch_counter,len(validds),accuracy,mean_img_per_second,data_time.calc_mean(),forward_time.calc_mean(),confmat)
-         logger.info('prediction = %s',pred)
+         logger.info('<[%5d of %5d]> valid accuracy: %6.4f images/sec: %6.2f   data time: %6.3f  forward time: %6.3f confmat = %s',batch_counter,len(validds),mean_acc,mean_img_per_second,data_time.calc_mean(),forward_time.calc_mean(),json.dumps(confmat.tolist()))
+         # logger.info('prediction = %s',pred)
 
       start_data = time.time()
