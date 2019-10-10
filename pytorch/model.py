@@ -152,13 +152,13 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          # logger.info('inputs: %s targets: %s',inputs.shape,targets.shape)
          # logger.info('inputs: %s targets: %s',inputs[0,...,0],targets[0,0])
 
-         if inputs.shape[0] != batch_size:
-            logger.warning('input has incorrect batch size: %s',inputs.shape)
-            continue
+         #if inputs.shape[0] != batch_size:
+         #   logger.warning('input has incorrect batch size: %s',inputs.shape)
+         #   continue
 
-         if targets.shape[0] != batch_size:
-            logger.warning('target has incorrect batch size: %s',targets.shape)
-            continue
+         #if targets.shape[0] != batch_size:
+         #   logger.warning('target has incorrect batch size: %s',targets.shape)
+         #   continue
          
          # logger.debug('got training batch %s',batch_counter)
          start_move = end_data
