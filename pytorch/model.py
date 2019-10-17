@@ -183,7 +183,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          # logger.debug('got outputs: %s targets: %s',outputs,targets)
 
          start_loss = end_forward
-         loss_value = loss(outputs,targets,endpoints,weights,device=device,gamma=loss_gamma)
+         loss_value = loss(outputs,targets,endpoints,weights,device=device)#,gamma=loss_gamma)
          end_loss = time.time()
          monitor_loss.add_value(loss_value)
          # logger.debug('got loss')
