@@ -250,6 +250,34 @@ def pixelwise_crossentropy_focal(pred,targets,endpoints,weights,device='cpu',gam
    return loss.mean()
 
 
+def two_step_loss(pred,targets,endpoints,weights=None,device='cpu'):
+
+   # pred.shape = [N_batch, N_class, N_points]
+   # targets.shape = [N_batch,N_points]
+   # weights.shape = [N_batch,N_points]
+
+   # first step, calculate loss of something vs nothing
+
+   # this is a custom loss for when using classes:
+   # ["none","jet","electron","muon","tau"]
+
+   # we will calculate the sigmoid of the "none" class and use this
+   # as a something vs nothing classification
+
+   # apply sigmoid to none class to treat as identifier of nothing
+   targets_nothing = (targets == 0).float()
+   loss_nothing = torch.nn.functional.binary_cross_entropy_with_logits(pred[:,0,:],targets_nothing,reduction='none') * weights
+   loss_nothing = loss_nothing.mean()
+
+   # calculate the softmax for the remaining class objects, then mask based on truth
+   targets_something = (targets > 0).float()
+   loss_something = torch.nn.functional.cross_entropy(pred[:,1:,:],(targets-1).long(),reduction='none')
+   loss_something = loss_something * targets_something * weights
+   loss_something = loss_something.mean()
+
+   return loss_nothing + loss_something
+
+
 def pixelwise_crossentropy_weighted(pred,targets,endpoints,weights=None,device='cpu'):
    # for semantic segmentation, need to compare class
    # prediction for each point AND need to weight by the
