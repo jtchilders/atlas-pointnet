@@ -21,7 +21,7 @@ class CSVDataset(td.Dataset):
          self.filelist = filelist[:batch_limiter]
       self.len          = len(self.filelist)
       # self.col_names    = ['id', 'index', 'x', 'y', 'z', 'eta', 'phi','r','Et','pid','true_pt']
-      self.col_names    = ['id', 'index', 'x', 'y', 'z', 'eta', 'phi', 'r', 'Et','pid','n','trk_good','trk_id','trk_pt']
+      self.col_names    = ['id', 'index', 'x', 'y', 'z', 'r', 'eta', 'phi', 'Et','pid','n','trk_good','trk_id','trk_pt']
       # self.col_dtype    = {'id': np.int64, 'index': np.int64, 'x': np.float32, 'y': np.float32,
       #                      'z': np.float32, 'eta': np.float32, 'phi': np.float32, 'r': np.float32,
       #                      'Et': np.float32, 'pid': np.int32, 'true_pt': np.float32}
