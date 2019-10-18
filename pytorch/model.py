@@ -138,9 +138,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
       else:
          trainds_itr = trainds
 
-      if lrsched:
-         lrsched.step()
-
+      
       for param_group in opt.param_groups:
          logging.info('learning rate: %s',param_group['lr'])
          if writer:
@@ -318,6 +316,10 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in vclass_acc])
 
       model.train()
+
+      if lrsched:
+         lrsched.step()
+
 
 
 def valid_model(net,validds,config):
