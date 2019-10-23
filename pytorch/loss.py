@@ -265,16 +265,19 @@ def two_step_loss(pred,targets,endpoints,weights=None,device='cpu'):
    # as a something vs nothing classification
 
    # apply sigmoid to none class to treat as identifier of nothing
+   pred_nothing = pred[:,0,:]
    targets_nothing = (targets == 0).float()
-   loss_nothing = torch.nn.functional.binary_cross_entropy_with_logits(pred[:,0,:],targets_nothing,reduction='none') * weights
-   loss_nothing = loss_nothing.mean()
+   loss_nothing = torch.nn.functional.binary_cross_entropy_with_logits(pred_nothing,targets_nothing,reduction='none') * weights
+   loss_nothing = loss_nothing.sum() / weights.sum()
 
    # calculate the softmax for the remaining class objects, then mask based on truth
-   targets_something = (targets > 0).float()
-   loss_something = torch.nn.functional.cross_entropy(pred[:,1:,:],(targets-1).long(),reduction='none')
-   loss_something = loss_something * targets_something * weights
-   loss_something = loss_something.mean()
-
+   pred_something = pred[:,1:,:]
+   targets_weights = (targets > 0).float()
+   targets_something = (targets - 1).float() * targets_weights
+   loss_something = torch.nn.functional.cross_entropy(pred_something,targets_something.long(),reduction='none')
+   loss_something = loss_something * targets_weights * weights
+   loss_something = loss_something.sum() / loss_something.nonzero().shape[0]
+   
    return loss_nothing + loss_something
 
 
