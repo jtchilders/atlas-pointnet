@@ -266,7 +266,7 @@ def two_step_loss(pred,targets,endpoints,weights=None,device='cpu'):
    return loss_nothing + loss_something
 
 
-def pixelwise_crossentropy_weighted(pred,targets,endpoints,weights=None,device='cpu'):
+def pixelwise_crossentropy_weighted(pred,targets,endpoints,weights=None,device='cpu',loss_offset=0.):
    # for semantic segmentation, need to compare class
    # prediction for each point AND need to weight by the
    # number of pixels for each point
@@ -289,4 +289,4 @@ def pixelwise_crossentropy_weighted(pred,targets,endpoints,weights=None,device='
    loss_value = torch.nn.CrossEntropyLoss(weight=proportional_weights,reduction='none')(pred,targets.long())
    loss_value = loss_value * weights
 
-   return loss_value.mean()
+   return loss_value.mean() + loss_offset

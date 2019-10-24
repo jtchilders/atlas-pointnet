@@ -123,6 +123,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
    monitor_acc = CalcMean.CalcMean()
 
    loss_gammas = [0,1,2,2,3,3,4,4,5,5]
+   loss_offsets = [10,5,1,0]
 
    valid_batch_counter = 0
    for epoch in range(epochs):
@@ -144,10 +145,13 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          if writer:
             writer.add_scalar('learning_rate',param_group['lr'],epoch)
 
+      loss_gamma = loss_gammas[-1]
       if epoch < len(loss_gammas):
          loss_gamma = loss_gammas[epoch]
-      else:
-         loss_gamma = loss_gammas[-1]
+      
+      loss_offset = loss_offsets[-1]
+      if epoch < len(loss_offsets):
+         loss_offset = loss_offsets[epoch]
 
       model.train()
       start_data = time.time()
@@ -186,7 +190,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          elif config['loss']['func'] in ['pixelwise_crossentropy_focal']:
             loss_value = loss(outputs,targets,endpoints,weights,device=device,gamma=loss_gamma)
          elif config['loss']['func'] in ['pixelwise_crossentropy_weighted']:
-            loss_value = loss(outputs,targets,endpoints,weights,device=device)
+            loss_value = loss(outputs,targets,endpoints,weights,device=device,loss_offset=loss_offset)
          end_loss = time.time()
          monitor_loss.add_value(loss_value)
          # logger.debug('got loss')
