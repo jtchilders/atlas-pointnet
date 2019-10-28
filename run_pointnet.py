@@ -162,6 +162,8 @@ def main():
       from pytorch import model,loss
       import torch
       logger.info('num_threads:        %s',torch.get_num_threads())
+      logger.info('torch version:      %s',torch.__version__)
+      logger.info('torch file:         %s',torch.__file__)
       torch.manual_seed(args.random_seed)
 
       net = model.get_model(config_file)

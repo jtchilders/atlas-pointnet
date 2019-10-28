@@ -142,10 +142,12 @@ def get_datasets(config_file):
       trainds = CSVDataset.get_loader(traindss,batch_size=config_file['training']['batch_size'],
                                       shuffle=train_shuffle,
                                       num_workers=config_file['data_handling']['workers'],
-                                      sampler=train_sampler)
+                                      sampler=train_sampler,
+                                      drop_last=True)
       validds = CSVDataset.get_loader(validdss,batch_size=config_file['training']['batch_size'],
                                       shuffle=valid_shuffle,
-                                      num_workers=0,sampler=valid_sampler)
+                                      num_workers=0,sampler=valid_sampler,
+                                      drop_last=True)
    elif 'dataset_csv' == config_file['data_handling']['input_format']:
       logger.info('using CSV Dataset data handler')
       from data_handlers.pytorch_dataset_csv import CSVDataset
@@ -160,11 +162,13 @@ def get_datasets(config_file):
       trainds = CSVDataset.get_loader(traindss,batch_size=config_file['training']['batch_size'],
                                       shuffle=train_shuffle,
                                       num_workers=config_file['data_handling']['workers'],
-                                      sampler=train_sampler)
+                                      sampler=train_sampler,
+                                      drop_last=True)
       validdss = CSVDataset(validlist,config_file)
       validds = CSVDataset.get_loader(validdss,batch_size=config_file['training']['batch_size'],
                                       shuffle=config_file['data_handling']['shuffle'],
-                                      num_workers=0)
+                                      num_workers=0,
+                                      drop_last=True)
 
    elif 'csv_pool' == config_file['data_handling']['input_format']:
       logger.info('using CSV pool data handler')
@@ -180,11 +184,13 @@ def get_datasets(config_file):
       traindss = ImageDataset(trainlist,config_file)
       trainds = ImageDataset.get_loader(traindss,batch_size=config_file['training']['batch_size'],
                                         shuffle=config_file['data_handling']['shuffle'],
-                                        num_workers=config_file['data_handling']['workers'])
+                                        num_workers=config_file['data_handling']['workers'],
+                                        drop_last=True)
       validdss = ImageDataset(validlist,config_file)
       validds = ImageDataset.get_loader(validdss,batch_size=config_file['training']['batch_size'],
                                         shuffle=config_file['data_handling']['shuffle'],
-                                        num_workers=config_file['data_handling']['workers'])
+                                        num_workers=config_file['data_handling']['workers'],
+                                        drop_last=True)
    else:
       raise Exception('no input file format specified in configuration, setting is %s' % config_file['data_handling']['input_format'])
 
