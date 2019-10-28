@@ -2,7 +2,7 @@ import pytorch.optimizer as opt
 import pytorch.loss as losses
 import numpy as np
 from sklearn.metrics import confusion_matrix
-import torch,logging,time
+import torch,logging,time,os
 import CalcMean,psutil
 logger = logging.getLogger(__name__)
 #torch.set_printoptions(sci_mode=False,precision=3)
@@ -15,6 +15,10 @@ def get_model(config):
 
    config['device'] = device
    logger.info('device:             %s',device)
+
+   if torch.cuda.is_available() and 'hvd' in config and config['hvd'] is not None:
+      logger.info('setting CUDA_VISIBLE_DEVICES to %s',config['hvd'].local_rank())
+      os.environ['CUDA_VISIBLE_DEVICES'] = str(config['hvd'].local_rank())
 
    if 'pointnet2d' in config['model']['model']:
       logger.info('using pointnet model')
@@ -283,6 +287,8 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
                vclass_acc[i].add_value(acc_value[i])
          else:
             vacc.add_value(acc_value.item())
+
+         del inputs,weights,targets
          
          if valid_batch_counter > nval_tests:
             break
