@@ -194,17 +194,16 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          elif config['loss']['func'] in ['pixelwise_crossentropy_weighted']:
             loss_value = loss(outputs,targets,endpoints,weights,device=device,loss_offset=loss_offset)
          end_loss = time.time()
-         monitor_loss.add_value(loss_value.item())
-         # logger.debug('got loss')
+         monitor_loss.add_value(float(loss_value))
 
          start_acc = time.time()
          acc_value = acc(outputs,targets,device)
          if 'mean_class_iou' in config['loss']['acc']:
             for i in range(nclasses):
-               class_accuracy[i].add_value(acc_value[i].item())
+               class_accuracy[i].add_value(float(acc_value[i]))
             monitor_acc.add_value(acc_value.mean())
          else:
-            monitor_acc.add_value(acc_value.item())
+            monitor_acc.add_value(float(acc_value))
          end_acc = time.time()
 
          start_backward = end_acc
@@ -223,7 +222,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
 
          batch_counter += 1
 
-         del inputs,targets,weights,loss_value,acc_value
+         del inputs,targets,weights,loss_value,acc_value,endpoints
 
          # print statistics
          if batch_counter % status == 0:
@@ -293,16 +292,16 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          del inputs
 
          loss_value = loss(outputs,targets,endpoints,weights,device)
-         del weights
-         vloss.add_value(loss_value.item())
+         del weights,endpoints
+         vloss.add_value(float(loss_value))
          acc_value = acc(outputs,targets,device)
          del targets,loss_value
 
          if 'mean_class_iou' in config['loss']['acc']:
             for i in range(nclasses):
-               vclass_acc[i].add_value(acc_value[i].item())
+               vclass_acc[i].add_value(float(acc_value[i]))
          else:
-            vacc.add_value(acc_value.item())
+            vacc.add_value(float(acc_value))
 
          del acc_value
 
