@@ -85,8 +85,171 @@ def setup(net,hvd,config):
 
    return optimizer,lrsched
 
-
 def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
+
+   batch_size = config['training']['batch_size']
+   status = config['status']
+   epochs = config['training']['epochs']
+   # nval = config['nval']
+   nval_tests = config['nval_tests']
+   nsave = config['nsave']
+   model_save = config['model_save']
+   rank = config['rank']
+
+   if 'mean_class_iou' in config['loss']['acc']:
+      classes = config['data_handling']['classes']
+      nclasses = len(classes)
+      class_accuracy = [CalcMean.CalcMean() for _ in classes]
+
+   # some data handlers need a restart
+   if 'csv_pool' == config['data_handling']['input_format']:
+      validds.start_epoch()
+
+      # get data iterator for validation
+      logger.info('using batch_gen method for valid')
+      validds_itr = iter(validds.batch_gen())
+   else:
+      validds_itr = validds
+
+   loss = losses.get_loss(config)
+   acc = losses.get_accuracy(config)
+
+   loss_gammas = [0,1,2,2,3,3,4,4,5,5]
+   loss_offsets = [10,5,1,0]
+
+   for epoch in range(epochs):
+      logger.info(' epoch %s of %s',epoch,epochs)
+
+      # some data handlers need a restart
+      if 'csv_pool' == config['data_handling']['input_format']:
+         trainds.start_epoch()
+
+         # get data iterator
+         logger.info('using batch_gen method for train')
+         trainds_itr = iter(trainds.batch_gen())
+      else:
+         trainds_itr = trainds
+
+      for param_group in opt.param_groups:
+         logging.info('learning rate: %s',param_group['lr'])
+         if writer:
+            writer.add_scalar('learning_rate',param_group['lr'],epoch)
+
+      loss_gamma = loss_gammas[-1]
+      if epoch < len(loss_gammas):
+         loss_gamma = loss_gammas[epoch]
+      
+      loss_offset = loss_offsets[-1]
+      if epoch < len(loss_offsets):
+         loss_offset = loss_offsets[epoch]
+
+      model.train()
+      for batch_counter,(inputs,weights,targets) in enumerate(trainds_itr):
+         
+         # move data to device
+         inputs = inputs.to(device)
+         weights = weights.to(device)
+         targets = targets.to(device)
+         
+         # zero grads
+         opt.zero_grad()
+         
+         # model forward pass
+         outputs,endpoints = model(inputs)
+         
+         # loss
+         if config['loss']['func'] in ['two_step_loss']:
+            loss_value = loss(outputs,targets,endpoints,weights,device=device)
+         elif config['loss']['func'] in ['pixelwise_crossentropy_focal']:
+            loss_value = loss(outputs,targets,endpoints,weights,device=device,gamma=loss_gamma)
+         elif config['loss']['func'] in ['pixelwise_crossentropy_weighted']:
+            loss_value = loss(outputs,targets,endpoints,weights,device=device,loss_offset=loss_offset)
+         
+         # backward calc grads
+         loss_value.backward()
+
+         # apply grads
+         opt.step()
+
+         loss_value = float(loss_value)
+         del inputs,targets,weights,endpoints
+
+         # print statistics
+         if batch_counter % status == 0:
+            
+            logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f',epoch + 1,epochs,batch_counter,len(trainds),loss_value)
+
+            if writer and rank == 0:
+               global_batch = epoch * len(trainds) + batch_counter
+               writer.add_scalars('loss',{'train':loss_value},global_batch)
+
+         # periodically save the model
+         if batch_counter % nsave == 0 and rank == 0:
+            torch.save(model.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
+
+      # save at end of epoch
+      torch.save(model.state_dict(),model_save + '_%05d.torch_model_state_dict' % epoch)
+      
+      logger.info('epoch %s complete, running validation on %s batches',epoch,nval_tests)
+
+      # every epoch, evaluate validation data set
+      model.eval()
+
+      vloss = CalcMean.CalcMean()
+      vacc = CalcMean.CalcMean()
+      if 'mean_class_iou' in config['loss']['acc']:
+         vclass_acc = [CalcMean.CalcMean() for _ in range(nclasses)]
+
+      for valid_batch_counter,(inputs,weights,targets) in enumerate(validds_itr):
+         logger.info('validation batch %s of %s',valid_batch_counter,len(validds))
+
+         inputs = inputs.to(device)
+         targets = targets.to(device)
+         weights = weights.to(device)
+
+         outputs,endpoints = model(inputs)
+
+         loss_value = loss(outputs,targets,endpoints,weights,device)
+         vloss.add_value(float(loss_value))
+         
+         acc_value = acc(outputs,targets,device)
+         if 'mean_class_iou' in config['loss']['acc']:
+            for i in range(nclasses):
+               vclass_acc[i].add_value(float(acc_value[i]))
+         else:
+            vacc.add_value(float(acc_value))
+
+         del acc_value,weights,endpoints,inputs,targets,loss_value
+
+         if valid_batch_counter > nval_tests:
+            break
+
+      mean_acc = vacc.calc_mean()
+      mean_loss = vloss.calc_mean()
+      if config['hvd'] is not None:
+         mean_acc  = config['hvd'].allreduce(torch.tensor([mean_acc]))
+         mean_loss = config['hvd'].allreduce(torch.tensor([mean_loss]))
+      
+      # add validation to tensorboard
+      if writer and rank == 0:
+         global_batch = epoch * len(trainds) + batch_counter
+         writer.add_scalars('loss',{'valid':mean_loss},global_batch)
+         writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
+         if 'mean_class_iou' in config['loss']['acc']:
+            for i in range(nclasses):
+               writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].calc_mean()},global_batch)
+         
+      logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter + 1)
+      if 'mean_class_iou' in config['loss']['acc']:
+         logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in vclass_acc])
+
+      model.train()
+
+      if lrsched:
+         lrsched.step()
+
+
+def train_model_debug(model,opt,lrsched,trainds,validds,config,writer=None):
 
    batch_size = config['training']['batch_size']
    status = config['status']
@@ -263,6 +426,9 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          # end training loop, check if should exit
          # if batch_limiter is not None and batch_counter > batch_limiter:
          #    break
+
+      # save at end of epoch
+      torch.save(model.state_dict(),model_save + '_%05d.torch_model_state_dict' % epoch)
       
       logger.info('epoch %s complete, running validation on %s batches',epoch,nval_tests)
       # if this is set, skip validation
