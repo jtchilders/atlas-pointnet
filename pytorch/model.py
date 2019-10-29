@@ -181,13 +181,11 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          end_move = time.time()
 
          opt.zero_grad()
-         # logger.debug('zeroed opt')
+         
          start_forward = time.time()
          outputs,endpoints = model(inputs)
-         # logger.info('outputs = %s targets = %s',torch.nn.Softmax(dim=1)(outputs)[0,...,0],targets[0,0])
          end_forward = time.time()
-         # logger.debug('got outputs: %s targets: %s',outputs,targets)
-
+         
          start_loss = end_forward
          if config['loss']['func'] in ['two_step_loss']:
             loss_value = loss(outputs,targets,endpoints,weights,device=device)#,gamma=loss_gamma)
@@ -196,17 +194,17 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          elif config['loss']['func'] in ['pixelwise_crossentropy_weighted']:
             loss_value = loss(outputs,targets,endpoints,weights,device=device,loss_offset=loss_offset)
          end_loss = time.time()
-         monitor_loss.add_value(loss_value)
+         monitor_loss.add_value(loss_value.item())
          # logger.debug('got loss')
 
          start_acc = time.time()
          acc_value = acc(outputs,targets,device)
          if 'mean_class_iou' in config['loss']['acc']:
             for i in range(nclasses):
-               class_accuracy[i].add_value(acc_value[i])
+               class_accuracy[i].add_value(acc_value[i].item())
             monitor_acc.add_value(acc_value.mean())
          else:
-            monitor_acc.add_value(acc_value)
+            monitor_acc.add_value(acc_value.item())
          end_acc = time.time()
 
          start_backward = end_acc
@@ -225,7 +223,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
 
          batch_counter += 1
 
-         del inputs,targets,weights
+         del inputs,targets,weights,loss_value,acc_value
 
          # print statistics
          if batch_counter % status == 0:
@@ -298,18 +296,18 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          del weights
          vloss.add_value(loss_value.item())
          acc_value = acc(outputs,targets,device)
-         del targets
+         del targets,loss_value
 
          if 'mean_class_iou' in config['loss']['acc']:
             for i in range(nclasses):
-               vclass_acc[i].add_value(acc_value[i])
+               vclass_acc[i].add_value(acc_value[i].item())
          else:
             vacc.add_value(acc_value.item())
 
+         del acc_value
+
          if valid_batch_counter > nval_tests:
             break
-
-
 
       mean_acc = vacc.calc_mean()
       mean_loss = vloss.calc_mean()
@@ -317,7 +315,6 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          mean_acc  = config['hvd'].allreduce(torch.tensor([mean_acc]))
          mean_loss = config['hvd'].allreduce(torch.tensor([mean_loss]))
       
-
       # add validation to tensorboard
       if writer and rank == 0:
          global_batch = epoch * len(trainds) + batch_counter
@@ -327,7 +324,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
             for i in range(nclasses):
                writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].calc_mean()},global_batch)
          
-      logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter+1)
+      logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter + 1)
       if 'mean_class_iou' in config['loss']['acc']:
          logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in vclass_acc])
 
@@ -335,7 +332,6 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
 
       if lrsched:
          lrsched.step()
-
 
 
 def valid_model(net,validds,config):
