@@ -292,22 +292,23 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          weights = weights.to(device)
 
          outputs,endpoints = model(inputs)
+         del inputs
 
          loss_value = loss(outputs,targets,endpoints,weights,device)
+         del weights
          vloss.add_value(loss_value.item())
          acc_value = acc(outputs,targets,device)
+         del targets
+
          if 'mean_class_iou' in config['loss']['acc']:
             for i in range(nclasses):
                vclass_acc[i].add_value(acc_value[i])
          else:
             vacc.add_value(acc_value.item())
 
-         del inputs,weights,targets
-         
          if valid_batch_counter > nval_tests:
             break
 
-         del inputs,targets,weights
 
 
       mean_acc = vacc.calc_mean()
