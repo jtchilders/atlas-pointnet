@@ -8,17 +8,23 @@ logger = logging.getLogger(__name__)
 #torch.set_printoptions(sci_mode=False,precision=3)
 
 # detect device available
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = None
+torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def get_model(config):
-
+   global device
    config['device'] = device
    logger.info('device:             %s',device)
 
    if torch.cuda.is_available() and 'hvd' in config and config['hvd'] is not None:
-      logger.info('setting CUDA_VISIBLE_DEVICES to %s',config['hvd'].local_rank())
-      os.environ['CUDA_VISIBLE_DEVICES'] = str(config['hvd'].local_rank())
+      dev_string = 'cuda:%i' % config['hvd'].local_rank()
+      logger.warning('setting device to %s',dev_string)
+      device = torch.device(dev_string)
+      #os.environ['CUDA_VISIBLE_DEVICES'] = str(config['hvd'].local_rank())
+      #torch.cuda.device(config['hvd'].local_rank())
+   else:
+      device = torch.device('cpu')
 
    if 'pointnet2d' in config['model']['model']:
       logger.info('using pointnet model')
@@ -170,9 +176,9 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
 
          # apply grads
          opt.step()
-
+         
+         # only keep the loss value not the class object
          loss_value = float(loss_value)
-         del inputs,targets,weights,endpoints
 
          # print statistics
          if batch_counter % status == 0:
@@ -182,10 +188,14 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
             if writer and rank == 0:
                global_batch = epoch * len(trainds) + batch_counter
                writer.add_scalars('loss',{'train':loss_value},global_batch)
+               writer.add_histogram('input_trans',endpoints['input_trans'].view(-1),global_batch)
 
          # periodically save the model
          if batch_counter % nsave == 0 and rank == 0:
             torch.save(model.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
+         
+         # release tensors for memory
+         del inputs,targets,weights,endpoints
 
       # save at end of epoch
       torch.save(model.state_dict(),model_save + '_%05d.torch_model_state_dict' % epoch)
