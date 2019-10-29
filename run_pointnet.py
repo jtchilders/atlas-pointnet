@@ -75,6 +75,8 @@ def main():
 
    rank = 0
    nranks = 1
+   local_rank = 0
+   local_size = 1
    hvd = None
    if args.horovod:
       print('importing horovod')
@@ -83,7 +85,10 @@ def main():
       hvd.init()
       rank = hvd.rank()
       nranks = hvd.size()
+      local_rank = hvd.local_rank()
+      local_size = hvd.local_size()
       logging_format = '%(asctime)s %(levelname)s:' + '{:05d}'.format(rank) + ':%(name)s:%(process)s:%(thread)s:%(message)s'
+      
 
    if rank == 0 and args.mem_mon:
       memorymon = mp.Process(target=print_mem_cpu)
@@ -97,7 +102,7 @@ def main():
                        datefmt=logging_datefmt,
                        filename=args.logfilename)
 
-   logger.info('rank %s of %s',rank,nranks)
+   logger.warning('rank %6s of %6s    local rank %6s of %6s',rank,nranks,local_rank,local_size)
    logger.info('hostname:           %s',socket.gethostname())
    logger.info('python version:     %s',sys.version)
 
