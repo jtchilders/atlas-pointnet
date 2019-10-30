@@ -4,7 +4,7 @@
       "model":                         "pointnet1d_semseg",
       "input_to_feature":              [[4,64,false],[64,64,false]],
       "feature_to_pool":               [[64,64,false],[64,128,false],[128,1024,false]],
-      "dense_layers":                  [[1024,512,0.7,true,"relu"],[512,256,0.7,true,"relu"],[256,4,0,false,null]]
+      "dense_layers":                  [[1024,512,0.7,true,"relu"],[512,256,0.7,true,"relu"],[256,null,0,false,null]]
    },
    "optimizer": {
       "name":                          "adam",
@@ -14,7 +14,7 @@
       "lrsched_gamma":                 0.75
    },
    "loss": {
-      "func":                          "two_step_loss",
+      "func":                          "pixelwise_crossentropy_weighted",
       "acc":                           "mean_class_iou"
    },
    "data_handling": {
@@ -32,7 +32,7 @@
       "queue_depth":                   20
    },
    "training": {
-      "batch_size":                    10,
+      "batch_size":                    2,
       "epochs":                        10,
       "steps_per_valid":               2
    }
