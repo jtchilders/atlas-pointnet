@@ -203,57 +203,59 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
       logger.info('epoch %s complete, running validation on %s batches',epoch,nval_tests)
 
       # every epoch, evaluate validation data set
-      model.eval()
+      with torch.no_grad(): 
 
-      vloss = CalcMean.CalcMean()
-      vacc = CalcMean.CalcMean()
-      if 'mean_class_iou' in config['loss']['acc']:
-         vclass_acc = [CalcMean.CalcMean() for _ in range(nclasses)]
-
-      for valid_batch_counter,(inputs,weights,targets) in enumerate(validds_itr):
-         logger.info('validation batch %s of %s',valid_batch_counter,len(validds))
-
-         inputs = inputs.to(device)
-         targets = targets.to(device)
-         weights = weights.to(device)
-
-         outputs,endpoints = model(inputs)
-
-         loss_value = loss(outputs,targets,endpoints,weights,device)
-         vloss.add_value(float(loss_value))
-         
-         acc_value = acc(outputs,targets,device)
+         vloss = CalcMean.CalcMean()
+         vacc = CalcMean.CalcMean()
          if 'mean_class_iou' in config['loss']['acc']:
-            for i in range(nclasses):
-               vclass_acc[i].add_value(float(acc_value[i]))
-         else:
-            vacc.add_value(float(acc_value))
+            vclass_acc = [CalcMean.CalcMean() for _ in range(nclasses)]
 
-         del acc_value,weights,endpoints,inputs,targets,loss_value
+         for valid_batch_counter,(inputs,weights,targets) in enumerate(validds_itr):
+            logger.info('validation batch %s of %s',valid_batch_counter,len(validds))
 
-         if valid_batch_counter > nval_tests:
-            break
+            inputs = inputs.to(device)
+            targets = targets.to(device)
+            weights = weights.to(device)
 
-      mean_acc = vacc.calc_mean()
-      mean_loss = vloss.calc_mean()
-      if config['hvd'] is not None:
-         mean_acc  = config['hvd'].allreduce(torch.tensor([mean_acc]))
-         mean_loss = config['hvd'].allreduce(torch.tensor([mean_loss]))
-      
-      # add validation to tensorboard
-      if writer and rank == 0:
-         global_batch = epoch * len(trainds) + batch_counter
-         writer.add_scalars('loss',{'valid':mean_loss},global_batch)
-         writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
-         if 'mean_class_iou' in config['loss']['acc']:
-            for i in range(nclasses):
-               writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].calc_mean()},global_batch)
+            outputs,endpoints = model(inputs)
+            del inputs
+
+            loss_value = loss(outputs,targets,endpoints,weights,device)
+            del endpoints,weights
+            vloss.add_value(float(loss_value))
+            
+            acc_value = acc(outputs,targets,device)
+            if 'mean_class_iou' in config['loss']['acc']:
+               for i in range(nclasses):
+                  vclass_acc[i].add_value(float(acc_value[i]))
+            else:
+               vacc.add_value(float(acc_value))
+
+            del acc_value,targets,loss_value,outputs
+
+            if valid_batch_counter > nval_tests:
+               break
+
+         mean_acc = vacc.calc_mean()
+         mean_loss = vloss.calc_mean()
+         if config['hvd'] is not None:
+            mean_acc  = config['hvd'].allreduce(torch.tensor([mean_acc]))
+            mean_loss = config['hvd'].allreduce(torch.tensor([mean_loss]))
          
-      logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter + 1)
-      if 'mean_class_iou' in config['loss']['acc']:
-         logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in vclass_acc])
+         # add validation to tensorboard
+         if writer and rank == 0:
+            global_batch = epoch * len(trainds) + batch_counter
+            writer.add_scalars('loss',{'valid':mean_loss},global_batch)
+            writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
+            if 'mean_class_iou' in config['loss']['acc']:
+               for i in range(nclasses):
+                  writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].calc_mean()},global_batch)
+            
+         logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter + 1)
+         if 'mean_class_iou' in config['loss']['acc']:
+            logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in vclass_acc])
 
-      model.train()
+      #model.train()
 
       if lrsched:
          lrsched.step()
