@@ -151,6 +151,8 @@ class PointNet1d(torch.nn.Module):
       for x in config['model']['dense_layers']:
          N_in,N_out,dropout,bn,act = x
          dr = int(dropout * 3)
+         if N_out is None:
+            N_out = nClasses
          self.dense_layers.add_module('dense_%d_to_%d' % (N_in,N_out),utils.Linear(N_in,N_out,bn=bn,activation=act))
          if dropout > 0:
             self.dense_layers.add_module('dropout_%03d' % dr,torch.nn.Dropout(dropout))
