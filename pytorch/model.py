@@ -102,10 +102,10 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
    model_save = config['model_save']
    rank = config['rank']
 
-   if 'mean_class_iou' in config['loss']['acc']:
+   if 'mean_class_iou' == config['loss']['acc']:
       classes = config['data_handling']['classes']
       nclasses = len(classes)
-      class_accuracy = [CalcMean.CalcMean() for _ in classes]
+      # class_accuracy = [CalcMean.CalcMean() for _ in classes]
 
    # some data handlers need a restart
    if 'csv_pool' == config['data_handling']['input_format']:
@@ -164,12 +164,14 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
          outputs,endpoints = model(inputs)
          
          # loss
-         if config['loss']['func'] in ['two_step_loss']:
+         if config['loss']['func'] in ['two_step_loss','pixelwise_bce_weighted_somenone']:
             loss_value = loss(outputs,targets,endpoints,weights,device=device)
          elif config['loss']['func'] in ['pixelwise_crossentropy_focal']:
             loss_value = loss(outputs,targets,endpoints,weights,device=device,gamma=loss_gamma)
          elif config['loss']['func'] in ['pixelwise_crossentropy_weighted']:
             loss_value = loss(outputs,targets,endpoints,weights,device=device,loss_offset=loss_offset)
+         else:
+            loss_value = loss(outputs,targets)
          
          # backward calc grads
          loss_value.backward()
@@ -203,11 +205,11 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
       logger.info('epoch %s complete, running validation on %s batches',epoch,nval_tests)
 
       # every epoch, evaluate validation data set
-      with torch.no_grad(): 
+      with torch.no_grad():
 
          vloss = CalcMean.CalcMean()
          vacc = CalcMean.CalcMean()
-         if 'mean_class_iou' in config['loss']['acc']:
+         if 'mean_class_iou' == config['loss']['acc']:
             vclass_acc = [CalcMean.CalcMean() for _ in range(nclasses)]
 
          for valid_batch_counter,(inputs,weights,targets) in enumerate(validds_itr):
@@ -225,7 +227,7 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
             vloss.add_value(float(loss_value))
             
             acc_value = acc(outputs,targets,device)
-            if 'mean_class_iou' in config['loss']['acc']:
+            if 'mean_class_iou' == config['loss']['acc']:
                for i in range(nclasses):
                   vclass_acc[i].add_value(float(acc_value[i]))
             else:
@@ -247,12 +249,12 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
             global_batch = epoch * len(trainds) + batch_counter
             writer.add_scalars('loss',{'valid':mean_loss},global_batch)
             writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
-            if 'mean_class_iou' in config['loss']['acc']:
+            if 'mean_class_iou' == config['loss']['acc']:
                for i in range(nclasses):
                   writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].calc_mean()},global_batch)
             
          logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter + 1)
-         if 'mean_class_iou' in config['loss']['acc']:
+         if 'mean_class_iou' == config['loss']['acc']:
             logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in vclass_acc])
 
       #model.train()
@@ -272,7 +274,7 @@ def train_model_debug(model,opt,lrsched,trainds,validds,config,writer=None):
    model_save = config['model_save']
    rank = config['rank']
 
-   if 'mean_class_iou' in config['loss']['acc']:
+   if 'mean_class_iou' == config['loss']['acc']:
       classes = config['data_handling']['classes']
       nclasses = len(classes)
       class_accuracy = [CalcMean.CalcMean() for _ in classes]
@@ -373,7 +375,7 @@ def train_model_debug(model,opt,lrsched,trainds,validds,config,writer=None):
 
          start_acc = time.time()
          acc_value = acc(outputs,targets,device)
-         if 'mean_class_iou' in config['loss']['acc']:
+         if 'mean_class_iou' == config['loss']['acc']:
             for i in range(nclasses):
                class_accuracy[i].add_value(float(acc_value[i]))
             monitor_acc.add_value(acc_value.mean())
@@ -405,7 +407,7 @@ def train_model_debug(model,opt,lrsched,trainds,validds,config,writer=None):
             mean_img_per_second = 1. / mean_img_per_second
             
             logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f train acc: %6.4f  images/sec: %6.2f   data time: %6.3f move time: %6.3f forward time: %6.3f loss time: %6.3f  backward time: %6.3f acc time: %6.3f inclusive time: %6.3f',epoch + 1,epochs,batch_counter,len(trainds),monitor_loss.calc_mean(),monitor_acc.calc_mean(),mean_img_per_second,data_time.calc_mean(),move_time.calc_mean(),forward_time.calc_mean(),acc_time.calc_mean(),backward_time.calc_mean(),acc_time.calc_mean(),batch_time.calc_mean())
-            if 'mean_class_iou' in config['loss']['acc']:
+            if 'mean_class_iou' == config['loss']['acc']:
                logger.info('<[%3d of %3d, %5d of %5d]> class accuracy: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in class_accuracy])
             # mem = psutil.virtual_memory()
             # logger.info('<[%3d of %3d, %5d of %5d]> cpu usage: %s mem total: %s mem free: %s (%4.1f%%)',
@@ -418,14 +420,14 @@ def train_model_debug(model,opt,lrsched,trainds,validds,config,writer=None):
                global_batch = epoch * len(trainds) + batch_counter
                writer.add_scalars('loss',{'train':monitor_loss.calc_mean()},global_batch)
                writer.add_scalars('accuracy',{'train':monitor_acc.calc_mean()},global_batch)
-               if 'mean_class_iou' in config['loss']['acc']:
+               if 'mean_class_iou' == config['loss']['acc']:
                   for i in range(nclasses):
                      writer.add_scalars('class_accuracy',{'train_%i' % i:class_accuracy[i].calc_mean()},global_batch)
                writer.add_scalar('image_per_second',mean_img_per_second,global_batch)
 
             monitor_loss = CalcMean.CalcMean()
             monitor_acc = CalcMean.CalcMean()
-            if 'mean_class_iou' in config['loss']['acc']:
+            if 'mean_class_iou' == config['loss']['acc']:
                class_accuracy = [CalcMean.CalcMean() for _ in classes]
 
          # periodically save the model
@@ -456,7 +458,7 @@ def train_model_debug(model,opt,lrsched,trainds,validds,config,writer=None):
 
       vloss = CalcMean.CalcMean()
       vacc = CalcMean.CalcMean()
-      if 'mean_class_iou' in config['loss']['acc']:
+      if 'mean_class_iou' == config['loss']['acc']:
          vclass_acc = [CalcMean.CalcMean() for _ in range(nclasses)]
 
       for valid_batch_counter,(inputs,weights,targets) in enumerate(validds_itr):
@@ -475,7 +477,7 @@ def train_model_debug(model,opt,lrsched,trainds,validds,config,writer=None):
          acc_value = acc(outputs,targets,device)
          del targets,loss_value
 
-         if 'mean_class_iou' in config['loss']['acc']:
+         if 'mean_class_iou' == config['loss']['acc']:
             for i in range(nclasses):
                vclass_acc[i].add_value(float(acc_value[i]))
          else:
@@ -497,12 +499,12 @@ def train_model_debug(model,opt,lrsched,trainds,validds,config,writer=None):
          global_batch = epoch * len(trainds) + batch_counter
          writer.add_scalars('loss',{'valid':mean_loss},global_batch)
          writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
-         if 'mean_class_iou' in config['loss']['acc']:
+         if 'mean_class_iou' == config['loss']['acc']:
             for i in range(nclasses):
                writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].calc_mean()},global_batch)
          
       logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter + 1)
-      if 'mean_class_iou' in config['loss']['acc']:
+      if 'mean_class_iou' == config['loss']['acc']:
          logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in vclass_acc])
 
       model.train()
@@ -558,7 +560,7 @@ def valid_model(net,validds,config):
 
       # logger.debug(' pred = %s targets = %s',pred[0,:,0],targets[0,0])
       accuracy = acc(pred,targets)
-      if 'mean_class_iou' in config['loss']['acc']:
+      if 'mean_class_iou' == config['loss']['acc']:
          class_accuracy = accuracy
          accuracy = accuracy.mean()
 
