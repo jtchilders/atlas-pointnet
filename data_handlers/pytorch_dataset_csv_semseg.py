@@ -66,17 +66,17 @@ class CSVDataset(td.Dataset):
    def get_input(self):
       if self.silicon_only:
          input = self.data[self.data['id'] < 4e17]
-         input = input[self.coords]
+         input = input[self.coords].to_numpy()
       else:
-         input = self.data[self.coords]
+         input = self.data[self.coords].to_numpy()
 
       if not self.cartesian:
-         input['r'] = input['r'] / 1000.
+         input[:,2] /= 1000.
       else:
-         input[['x','y','z']] /= 1000.
-         input['Et'] /= 100.
+         input[:,0:3] /= 1000.
+      
+      input[:,3] /= 100.
 
-      input = input.to_numpy()
       input = np.float32(input)
 
       # create a weight vector with 1's where points exist and 0's where they do not
