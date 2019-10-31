@@ -124,11 +124,32 @@ def mean_class_iou(pred,targets,device='cpu'):
    return iou
 
 
+def mean_class_iou_binary(pred,targets,device='cpu'):
+
+   pred = pred.view(targets.shape)
+   pred = torch.sigmoid(pred)
+
+   iou = IoU_coeff_binary(pred,targets.float(),device=device)
+
+   return iou
+
+
 def IoU_coeff(pred,targets,smooth=1,device='cpu'):
    # logger.info(' pred = %s targets = %s',pred.shape,targets.shape)
    intersection = torch.abs(targets * pred).sum(dim=2)
    # logger.info(' intersection = %s ',intersection)
    union = targets.sum(dim=2) + pred.sum(dim=2) - intersection
+   # logger.info(' union = %s ',union)
+   iou = torch.mean((intersection + smooth) / (union + smooth), dim=0)
+   # logger.info(' iou = %s ',iou)
+   return iou
+
+
+def IoU_coeff_binary(pred,targets,smooth=1,device='cpu'):
+   # logger.info(' pred = %s targets = %s',pred.shape,targets.shape)
+   intersection = torch.abs(targets * pred).sum(dim=1)
+   # logger.info(' intersection = %s ',intersection)
+   union = targets.sum(dim=1) + pred.sum(dim=1) - intersection
    # logger.info(' union = %s ',union)
    iou = torch.mean((intersection + smooth) / (union + smooth), dim=0)
    # logger.info(' iou = %s ',iou)
@@ -281,12 +302,37 @@ def pixelwise_crossentropy_weighted(pred,targets,endpoints,weights=None,device='
    for i in range(len(class_ids)):
       proportional_weights.append((targets == i).sum())
 
-   proportional_weights = torch.Tensor(proportional_weights).to(device)
+   proportional_weights = torch.Tensor(proportional_weights,device=device)
    proportional_weights = proportional_weights / proportional_weights.sum()
    proportional_weights = 1 - proportional_weights
    proportional_weights[proportional_weights == float('Inf')] = 0
 
    loss_value = torch.nn.CrossEntropyLoss(weight=proportional_weights,reduction='none')(pred,targets.long())
+   # weights zero suppresses the loss calculated from padded points which were added to make fixed length inputs
    loss_value = loss_value * weights
 
    return loss_value.mean() + loss_offset
+
+
+def pixelwise_bce_weighted_somenone(pred,targets,endpoints,weights=None,device='cpu'):
+   # for semantic segmentation, need to compare class
+   # prediction for each point AND need to weight by the
+   # number of pixels for each point
+
+   # flatten targets and predictions
+
+   # pred.shape = [N_batch, N_class, N_points]
+   # targets.shape = [N_batch,N_points]
+   # logger.info(f'pred = {pred.shape}  targets = {targets.shape}')
+   # logger.info(f'pred = {pred}  targets = {targets}')
+   
+   fraction_something_classes = (weights.sum() / targets.sum()) - 1.
+   pos_targets = targets.sum()
+   pos_pred = (torch.sigmoid(pred) > 0.5).sum()
+   logger.info('pos_targets -> %s pos_pred -> %s ',pos_targets,pos_pred)
+
+   loss_value = torch.nn.functional.binary_cross_entropy_with_logits(pred.view(targets.shape),targets.float(),reduction='none',pos_weight=fraction_something_classes)
+   # weights zero suppresses the loss calculated from padded points which were added to make fixed length inputs
+   loss_value = loss_value * weights
+
+   return loss_value.mean()
