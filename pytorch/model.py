@@ -90,9 +90,10 @@ def setup(net,hvd,config):
 
    return optimizer,lrsched
 
+
 def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
 
-   batch_size = config['training']['batch_size']
+   # batch_size = config['training']['batch_size']
    status = config['status']
    epochs = config['training']['epochs']
    # nval = config['nval']
@@ -117,7 +118,9 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
       validds_itr = validds
 
    loss = losses.get_loss(config)
+   ave_loss = CalcMean.CalcMean()
    acc = losses.get_accuracy(config)
+   ave_acc = CalcMean.CalcMean()
 
    loss_gammas = [0,1,2,2,3,3,4,4,5,5]
    loss_offsets = [10,5,1,0]
@@ -171,32 +174,38 @@ def train_model(model,opt,lrsched,trainds,validds,config,writer=None):
             loss_value = loss(outputs,targets,endpoints,weights,device=device,loss_offset=loss_offset)
          else:
             loss_value = loss(outputs,targets)
+
+         ave_loss.add_value(float(loss_value))
+
+         # calc acc
+         ave_acc.add_value(float(acc(outputs,targets,device)))
          
          # backward calc grads
          loss_value.backward()
 
          # apply grads
          opt.step()
-         
-         # only keep the loss value not the class object
-         loss_value = float(loss_value)
 
          # print statistics
          if batch_counter % status == 0:
             
-            logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f',epoch + 1,epochs,batch_counter,len(trainds),loss_value)
+            logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds),ave_loss.calc_mean(),ave_acc.calc_mean())
 
             if writer and rank == 0:
                global_batch = epoch * len(trainds) + batch_counter
-               writer.add_scalars('loss',{'train':loss_value},global_batch)
+               writer.add_scalars('loss',{'train':ave_loss.calc_mean()},global_batch)
+               writer.add_scalars('accuracy',{'train':ave_acc.calc_mean()},global_batch)
                writer.add_histogram('input_trans',endpoints['input_trans'].view(-1),global_batch)
+
+            ave_loss = CalcMean.CalcMean()
+            ave_acc = CalcMean.CalcMean()
 
          # periodically save the model
          if batch_counter % nsave == 0 and rank == 0:
             torch.save(model.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
          
          # release tensors for memory
-         del inputs,targets,weights,endpoints
+         del inputs,targets,weights,endpoints,loss_value
 
       # save at end of epoch
       torch.save(model.state_dict(),model_save + '_%05d.torch_model_state_dict' % epoch)
