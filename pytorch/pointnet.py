@@ -116,7 +116,7 @@ class Transform2d(torch.nn.Module):
 
 
 class PointNet1d(torch.nn.Module):
-   def __init__(self,config,bn=True):
+   def __init__(self,config,bn=False):
       super(PointNet1d,self).__init__()
 
       input_shape = config['data_handling']['image_shape']

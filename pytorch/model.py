@@ -21,8 +21,7 @@ def get_model(config):
       dev_string = 'cuda:%i' % config['hvd'].local_rank()
       logger.warning('setting device to %s',dev_string)
       device = torch.device(dev_string)
-      #os.environ['CUDA_VISIBLE_DEVICES'] = str(config['hvd'].local_rank())
-      #torch.cuda.device(config['hvd'].local_rank())
+      os.environ['CUDA_VISIBLE_DEVICES'] = str(config['hvd'].local_rank())
    else:
       device = torch.device('cpu')
 
