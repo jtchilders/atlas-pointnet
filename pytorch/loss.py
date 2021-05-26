@@ -327,11 +327,13 @@ def pixelwise_bce_weighted_somenone(pred,targets,endpoints,weights=None,device='
    # logger.info(f'pred = {pred}  targets = {targets}')
    
    fraction_something_classes = (weights.sum() / targets.sum()) - 1.
-   pos_targets = targets.sum()
-   pos_pred = (torch.sigmoid(pred) > 0.5).sum()
-   logger.info('pos_targets -> %s pos_pred -> %s ',pos_targets,pos_pred)
+   # logger.info(f'fraction_something_classes = {fraction_something_classes}')
+
+   # logger.info('pred[0,0,0:10] = %s',torch.sigmoid(pred[0,0,0:10]))
+   # logger.info('targets[0,0:10] = %s',targets[0,0:10])
 
    loss_value = torch.nn.functional.binary_cross_entropy_with_logits(pred.view(targets.shape),targets.float(),reduction='none',pos_weight=fraction_something_classes)
+   # logger.info('loss_value[0,0:10] = %s',loss_value[0,0:10])
    # weights zero suppresses the loss calculated from padded points which were added to make fixed length inputs
    loss_value = loss_value * weights
 

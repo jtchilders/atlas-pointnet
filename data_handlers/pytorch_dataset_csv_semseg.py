@@ -105,7 +105,8 @@ class CSVDataset(td.Dataset):
    def bce_something_targets(self):
       target = np.int32(self.data['pid'].to_numpy())
 
-      target = torch.from_numpy((target != self.nothing_class))
+      target = np.int32((target != self.nothing_class))
+      target = torch.from_numpy(target)
 
       padded_target = torch.zeros(self.img_shape[0],dtype=torch.int)
       padded_target[:target.shape[0]] = target
