@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
 import argparse,logging,socket,json,sys,psutil,time,os
 import numpy as np
-from data_handlers import utils as datautils
+import data_handler
+import model
 import torch
+import loss
+import accuracy
+import optimizer
 import tensorboardX
+import CalcMean
 import multiprocessing as mp
 
 logger = logging.getLogger(__name__)
-
-
-def print_mem_cpu():
-   start = time.time()
-   while True:
-      mem = psutil.virtual_memory()
-      print(str(time.time()-start) + ' pid = ' + str(os.getpid()) + ' total mem = ' + str(mem.total) + ' free mem = ' + str(mem.free/mem.total*100.) + ' cpu usage = ' + str(psutil.cpu_percent()))
-      time.sleep(1)
-
-
-
 
 
 def main():
@@ -49,11 +43,6 @@ def main():
 
    parser.add_argument('--horovod',default=False, action='store_true', help="Setup for distributed training")
 
-   parser.add_argument('--mem_mon',default=False, action='store_true', help="spawn subprocess to monitor memory")
-
-   parser.add_argument('--filelist_base',default='filelist',help='base filename for the output filelists')
-
-   parser.add_argument('--flops',default=False,action='store_true',help='if you have module "flops-counter.pytorch" installed, this will try to give you a flops count for the model.')
 
    parser.add_argument('--debug', dest='debug', default=False, action='store_true', help="Set Logger to DEBUG")
    parser.add_argument('--error', dest='error', default=False, action='store_true', help="Set Logger to ERROR")
@@ -88,11 +77,6 @@ def main():
       local_rank = hvd.local_rank()
       local_size = hvd.local_size()
       logging_format = '%(asctime)s %(levelname)s:' + '{:05d}'.format(rank) + ':%(name)s:%(process)s:%(thread)s:%(message)s'
-      
-
-   if rank == 0 and args.mem_mon:
-      memorymon = mp.Process(target=print_mem_cpu)
-      memorymon.start()
 
    if rank > 0 and log_level == logging.INFO:
       log_level = logging.WARNING
@@ -102,9 +86,17 @@ def main():
                        datefmt=logging_datefmt,
                        filename=args.logfilename)
 
+   device = torch.device('cpu')
+   if torch.cuda.is_available():
+      device = torch.device('cuda')
+
    logger.warning('rank %6s of %6s    local rank %6s of %6s',rank,nranks,local_rank,local_size)
    logger.info('hostname:           %s',socket.gethostname())
    logger.info('python version:     %s',sys.version)
+   logger.info('num_threads:        %s',torch.get_num_threads())
+   logger.info('torch version:      %s',torch.__version__)
+   logger.info('torch file:         %s',torch.__file__)
+   
 
    logger.info('config file:        %s',args.config_file)
    logger.info('num files:          %s',args.num_files)
@@ -119,16 +111,12 @@ def main():
    logger.info('epochs:             %s',args.epochs)
    logger.info('horovod:            %s',args.horovod)
    logger.info('logdir:             %s',args.logdir)
-   logger.info('batch_limiter:      %s',args.batch_limiter)
-   logger.info('filelist_base:      %s',args.filelist_base)
-   logger.info('flops:              %s',args.flops)
 
    np.random.seed(args.random_seed)
 
    config_file = json.load(open(args.config_file))
    config_file['rank'] = rank
    config_file['nranks'] = nranks
-   config_file['flops'] = args.flops
    config_file['input_model_pars'] = args.input_model_pars
    config_file['horovod'] = args.horovod
    config_file['status'] = args.status
@@ -138,7 +126,6 @@ def main():
    config_file['model_save'] = args.model_save
    config_file['valid_only'] = args.valid_only
    config_file['batch_limiter'] = args.batch_limiter
-   config_file['filelist_base'] = args.filelist_base
 
    if args.valid_only and not args.input_model_pars:
       logger.error('if valid_only set, must provide input model')
@@ -155,96 +142,195 @@ def main():
    config_file['hvd'] = hvd
 
    # get datasets for training and validation
-   trainds,validds = datautils.get_datasets(config_file)
-   
+   trainds,testds = data_handler.get_datasets(config_file)
+
    # setup tensorboard
    writer = None
    if args.logdir and rank == 0:
       writer = tensorboardX.SummaryWriter(args.logdir)
    
    logger.info('building model')
-   if 'pytorch' in config_file['model']['framework']:
-      from pytorch import model,loss
-      import torch
-      logger.info('num_threads:        %s',torch.get_num_threads())
-      logger.info('torch version:      %s',torch.__version__)
-      logger.info('torch file:         %s',torch.__file__)
-      torch.manual_seed(args.random_seed)
+   torch.manual_seed(args.random_seed)
 
-      net = model.get_model(config_file)
-      if hasattr(trainds,'dataset') and hasattr(net,'output_grid'):
-         trainds.dataset.grid_size = net.output_grid
+   net = model.get_model(config_file)
 
-      if hasattr(validds,'dataset') and hasattr(net,'output_grid'):
-         validds.dataset.grid_size = net.output_grid
+   logger.info('model = \n %s',net)
 
-      opt,lrsched = model.setup(net,hvd,config_file)
+   total_params = sum(p.numel() for p in net.parameters())
+   logger.info('trainable parameters: %s',total_params)
 
-      #lossfunc = loss.get_loss(config_file)
-      #accfunc = loss.get_accuracy(config_file)
-
-      logger.info('model = \n %s',net)
-
-      if args.flops:
-         from ptflops import get_model_complexity_info
-         input_shape = config_file['data_handling']['image_shape']
-         input_shape = [input_shape[i] for i in range(len(input_shape)-1,-1,-1)]
-         flops,params = get_model_complexity_info(net,tuple(input_shape),print_per_layer_stat=False,as_strings=False)
-         logger.info('flops %s parameters %s',flops,params)
-
-      total_params = sum(p.numel() for p in net.parameters())
-      logger.info('trainable parameters: %s',total_params)
-
-      if args.valid_only:
-         model.valid_model(net,validds,config_file)
-      else:
-         model.train_model(net,opt,lrsched,trainds,validds,config_file,writer)
-
-
-   if rank == 0 and args.mem_mon:
-      memorymon.kill()
-      
-            
-
-def print_module(module,input_shape,input_channels,name=None,indent=0):
-
-   output_string = ''
-   output_channels = input_channels
-   output_shape = input_shape
-
-   output_string += '%10s' % ('>' * indent)
-   if name:
-      output_string += ' %20s' % name
+   if args.valid_only:
+      valid_model(net,validds,config_file)
    else:
-      output_string += ' %20s' % module.__class__.__name__
-
-   # convolutions change channels
-   if 'submanifoldconv' in module.__class__.__name__.lower():
-      output_string += ' %4d -> %4d ' % (module.nIn,module.nOut)
-      output_channels = module.nOut
-   elif 'conv' in module.__class__.__name__.lower():
-      output_string += ' %4d -> %4d ' % (module.in_channels,module.out_channels)
-      output_channels = module.out_channels
-   elif 'pool' in module.__class__.__name__.lower():
-      output_shape = [int(input_shape[i] / module.pool_size[i]) for i in range(len(input_shape))]
-      output_string += ' %10s -> %10s ' % (input_shape, output_shape)
-   elif 'batchnormleakyrelu' in module.__class__.__name__.lower():
-      output_string += ' (%10s) ' % module.nPlanes
-   elif 'batchnorm2d' in module.__class__.__name__.lower():
-      output_string += ' (%10s) ' % module.num_features
-
-   output_string += '\n'
-
-   for name, child in module.named_children():
-      string,output_shape,output_channels = print_module(child, output_shape, output_channels, name, indent + 1)
-      output_string += string
-
-   return output_string,output_shape,output_channels
+      train_model(net,trainds,testds,config_file,device,writer)
 
 
-def summary(input_shape,input_channels,model):
+def train_model(model,trainds,testds,config,device,writer=None):
+   batch_size = config['data']['batch_size']
+   status = config['training']['status']
+   epochs = config['training']['epochs']
+   balanced_loss = config['loss']['balanced']
+   # nval = config['nval']
+   nval_tests = config['nval_tests']
+   nsave = config['nsave']
+   model_save = config['model_save']
+   rank = config['rank']
+   nranks = config['nranks']
 
-   return print_module(model,input_shape,input_channels)
+   ## create samplers for these datasets
+   train_sampler = torch.utils.data.distributed.DistributedSampler(trainds,nranks,rank,shuffle=True,drop_last=True)
+   test_sampler = torch.utils.data.distributed.DistributedSampler(testds,nranks,rank,shuffle=True,drop_last=True)
+
+   ## create data loaders
+   train_loader = torch.utils.data.DataLoader(trainds,shuffle=False,
+                                            sampler=train_sampler,num_workers=config['data']['num_parallel_readers'],
+                                            batch_size=batch_size,persistent_workers=True)
+   test_loader = torch.utils.data.DataLoader(testds,shuffle=False,
+                                            sampler=test_sampler,num_workers=config['data']['num_parallel_readers'],
+                                            batch_size=batch_size,persistent_workers=True)
+
+   loss_func = loss.get_loss(config)
+   ave_loss = CalcMean.CalcMean()
+   acc_func = accuracy.get_accuracy(config)
+   ave_acc = CalcMean.CalcMean()
+
+   opt_func = optimizer.get_optimizer(config)
+   opt = opt_func(model.parameters(),**config['optimizer']['args'])
+   lrsched_func = optimizer.get_learning_rate_scheduler(config)
+   lrsched = lrsched_func(opt,**config['lr_schedule']['args'])
+
+   model.to(device)
+
+   for epoch in range(epochs):
+      logger.info(' epoch %s of %s',epoch,epochs)
+
+      train_sampler.set_epoch(epoch)
+      test_sampler.set_epoch(epoch)
+
+      model.train()
+      for batch_counter,(inputs,targets,class_weights,nonzero_mask) in enumerate(train_loader):
+         
+         # move data to device
+         inputs = inputs.to(device)
+         targets = targets.to(device)
+         class_weights = class_weights.to(device)
+         nonzero_mask = nonzero_mask.to(device)
+
+         logger.info(f'input_shape={inputs.shape}')
+         
+         # zero grads
+         opt.zero_grad()
+         
+         # model forward pass
+         outputs,endpoints = model(inputs)
+         
+         # set the weights
+         if balanced_loss:
+            weights = class_weights
+            nonzero_to_class_scaler = torch.sum(nonzero_mask.type(torch.float32)) / torch.sum(class_weights.type(tf.float32))
+         else:
+            weights = nonzero_mask
+            nonzero_to_class_scaler = 1.
+
+         # loss
+         logger.info(f'outputs={outputs.shape} targets={targets.shape}')
+         loss_value = loss_func(outputs,targets)
+         loss_value = torch.sum(loss_value * weights) * nonzero_to_class_scaler
+         ave_loss.add_value(float(loss_value))
+
+         # calc acc
+         ave_acc.add_value(float(acc_func(outputs,targets,weights)))
+         
+         # backward calc grads
+         loss_value.backward()
+
+         # apply grads
+         opt.step()
+
+         # print statistics
+         if batch_counter % status == 0:
+            
+            logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds),ave_loss.calc_mean(),ave_acc.calc_mean())
+
+            if writer and rank == 0:
+               global_batch = epoch * len(trainds) + batch_counter
+               writer.add_scalars('loss',{'train':ave_loss.calc_mean()},global_batch)
+               writer.add_scalars('accuracy',{'train':ave_acc.calc_mean()},global_batch)
+               writer.add_histogram('input_trans',endpoints['input_trans'].view(-1),global_batch)
+
+            ave_loss = CalcMean.CalcMean()
+            ave_acc = CalcMean.CalcMean()
+
+         # periodically save the model
+         if batch_counter % nsave == 0 and rank == 0:
+            torch.save(model.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
+         
+         # release tensors for memory
+         del inputs,targets,weights,endpoints,loss_value
+
+      # save at end of epoch
+      torch.save(model.state_dict(),model_save + '_%05d.torch_model_state_dict' % epoch)
+      
+      logger.info('epoch %s complete, running validation on %s batches',epoch,nval_tests)
+
+      # every epoch, evaluate validation data set
+      model.eval()
+
+      vloss = CalcMean.CalcMean()
+      vacc = CalcMean.CalcMean()
+      if 'mean_class_iou' == config['loss']['acc']:
+         vclass_acc = [CalcMean.CalcMean() for _ in range(nclasses)]
+
+      for valid_batch_counter,(inputs,weights,targets) in enumerate(validds_itr):
+         logger.info('validation batch %s of %s',valid_batch_counter,len(validds))
+
+         inputs = inputs.to(device)
+         targets = targets.to(device)
+         weights = weights.to(device)
+
+         outputs,endpoints = model(inputs)
+         del inputs
+
+         loss_value = loss(outputs,targets,endpoints,weights,device)
+         del endpoints,weights
+         vloss.add_value(float(loss_value))
+         
+         acc_value = acc(outputs,targets,device)
+         if 'mean_class_iou' == config['loss']['acc']:
+            for i in range(nclasses):
+               vclass_acc[i].add_value(float(acc_value[i]))
+         else:
+            vacc.add_value(float(acc_value))
+
+         del acc_value,targets,loss_value,outputs
+
+         if valid_batch_counter > nval_tests:
+            break
+
+      mean_acc = vacc.calc_mean()
+      mean_loss = vloss.calc_mean()
+      if config['hvd'] is not None:
+         mean_acc  = config['hvd'].allreduce(torch.tensor([mean_acc]))
+         mean_loss = config['hvd'].allreduce(torch.tensor([mean_loss]))
+      
+      # add validation to tensorboard
+      if writer and rank == 0:
+         global_batch = epoch * len(trainds) + batch_counter
+         writer.add_scalars('loss',{'valid':mean_loss},global_batch)
+         writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
+         if 'mean_class_iou' == config['loss']['acc']:
+            for i in range(nclasses):
+               writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].calc_mean()},global_batch)
+         
+      logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter + 1)
+      if 'mean_class_iou' == config['loss']['acc']:
+         logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in vclass_acc])
+
+      model.train()
+
+      # update learning rate
+      lrsched.step()        
+
 
 
 if __name__ == "__main__":

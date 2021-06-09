@@ -1,0 +1,59 @@
+{
+   "model": {
+      "name":                          "pointnet2",
+      "knn":                           20,
+      "conv2d_size":                   128,
+      "dropout":                       0.4,
+      "use_kernel_reg":                false,
+      "kernel_reg":                    1e-3,
+      "mixed_precisionBF":             "mixed_bfloat16",
+      "mixed_precision":               false
+   },
+   "optimizer": {
+      "name":                          "Adam",
+      "args": {
+         "lr":                         0.01
+      }
+   },
+   "lr_schedule": {
+      "name":                          "MultiStepLR",
+      "args": {
+         "milestones":                 [5,10,15,20],
+         "gamma":                      0.75
+      }
+   },
+   "loss": {
+      "name":                          "CrossEntropyLoss",
+      "args": {
+         "reduction":                  "none"
+      },
+      "balanced":                      false
+   },
+   "accuracy": {
+      "name":                          "softmax_accuracy"
+   },
+   "data": {
+      "handler":                       "pytorch_dataset_csv_semseg",
+      "train_filelist":                "/Users/jchilders/git/atlas-pointnet/trainlist.txt",
+      "test_filelist":                 "/Users/jchilders/git/atlas-pointnet/vallist.txt",
+      "batch_size":                    2,
+      "dtype":                         "float32",
+      "shuffle_buffer":                30000,
+      "reshuffle_each_iteration":      true,
+      "num_parallel_readers":          3,
+      "prefectch_buffer_size":         10,
+      "num_features":                  7,
+      "num_classes":                   3,
+      "num_channels":                  3,
+      "num_points":                    15000,
+      "rotation":                      true,
+      "smear":                         false,
+      "xyz_norm":                      true,
+      "smear_mean":                    1.0,
+      "smear_sigma":                   0.03
+   },
+   "training": {
+      "epochs":                        20,
+      "status":                        10
+   }
+}
