@@ -64,6 +64,7 @@ def index_points(points, idx):
    # build vector [B,...] where entries are set to the batch number
    batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape)
    # select points based on indices
+   # logger.info(f'idx: points.shape={points.shape} batch_indices.shape={batch_indices.shape} idx.shape={idx.shape} {idx.min()} {idx.max()}')
    new_points = points[batch_indices, idx, :]
    return new_points
 
@@ -76,14 +77,14 @@ def farthest_point_sample(xyz, npoint):
    Return:
      centroids: sampled pointcloud index, [B, npoint]
    """
-   logger.info(f'fps: xyz.shape={xyz.shape}')
+   # logger.info(f'fps: xyz.shape={xyz.shape}')
    device = xyz.device
    B, N, C = xyz.shape
    centroids = torch.zeros(B, npoint, dtype=torch.long).to(device)
    distance = torch.ones(B, N).to(device) * 1e10
    farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device)
    batch_indices = torch.arange(B, dtype=torch.long).to(device)
-   logger.info(f'fps: batch_indices.shape={batch_indices.shape} farthest.shape={farthest.shape} centroids.shape={centroids.shape}')
+   # logger.info(f'fps: batch_indices.shape={batch_indices.shape} farthest.shape={farthest.shape} centroids.shape={centroids.shape}')
    for i in range(npoint):
       centroids[:, i] = farthest
       centroid = xyz[batch_indices, farthest, :].view(B, 1, 3)
@@ -107,27 +108,26 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
    device = xyz.device
    B, N, C = xyz.shape
    _, S, _ = new_xyz.shape
-   logger.info(f'qb: xyz.shape={xyz.shape} new_xyz.shape={new_xyz.shape} radius={radius} nsample={nsample}')
+   # logger.info(f'qb: xyz.shape={xyz.shape} new_xyz.shape={new_xyz.shape} radius={radius} nsample={nsample}')
    # logger.info(f'qb: xyz.shape={xyz.shape} new_xyz.shape={new_xyz.shape}')
    # For each batch and point group, create indices of all points
    group_idx = torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])  # [B, S, N]
    # calculate the square distance between all points and the subsample
    sqrdists = square_distance(new_xyz, xyz)  # [B, S, N]
-   logger.info(f'qb: sqrdists.shape={sqrdists.shape} group_idx.shape={group_idx.shape}')
-   logger.info(f'qb: sqrdists={sqrdists.mean(1)[0,0:10]} {sqrdists.min()} {sqrdists.max()}')
+   # logger.info(f'qb: sqrdists.shape={sqrdists.shape} group_idx.shape={group_idx.shape}')
    # set points outside the radius to the max npoint index
    group_idx[sqrdists > radius ** 2] = N
    # sort indices from smallest to largest and clip to nsample
    group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample]  # [B, S, nsample]
    # create array with only first entry
    group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample])  # [B, S, nsample]
-   logger.info(f'qb: group_first={group_first.shape} {group_first.min()} {group_first.max()}')
+   # logger.info(f'qb: group_first={group_first.shape} {group_first.min()} {group_first.max()}')
    # get mask of entries set to max index
    mask = group_idx == N
-   logger.info(f'qb: mask={mask.int().sum()} mask.shape={mask.shape}')
+   # logger.info(f'qb: mask={mask.int().sum()} mask.shape={mask.shape}')
    # set all the points outside the group to be the index of the first point in the group.
    group_idx[mask] = group_first[mask]
-   logger.info(f'qb: group_idx={group_idx.shape} {group_idx.min()} {group_idx.max()}')
+   # logger.info(f'qb: group_idx={group_idx.shape} {group_idx.min()} {group_idx.max()}')
    return group_idx
 
 
@@ -143,20 +143,21 @@ def sample_and_group(npoint, radius, nsample, xyz, points):
       new_xyz: sampled points position data, [B, npoint, nsample, 3]
       new_points: sampled points data, [B, npoint, nsample, 3+D]
    """
-   logger.info(f'sg: xyz.shape={xyz.shape}')
+   # logger.info(f'sg: xyz.shape={xyz.shape}')
    B, N, C = xyz.shape
    S = npoint
    fps_idx = farthest_point_sample(xyz, npoint) # [B, npoint]
-   logger.info(f'sg: fps_idx.shape={fps_idx.shape}')
+   # logger.info(f'sg: fps_idx.shape={fps_idx.shape}')
    new_xyz = index_points(xyz, fps_idx) # [B, npoint, 3]
-   logger.info(f'sg: new_xyz.shape={new_xyz.shape}')
+   # logger.info(f'sg: new_xyz.shape={new_xyz.shape}')
    idx = query_ball_point(radius, nsample, xyz, new_xyz) # [B, npoint, nsample]
-   logger.info(f'sg: idx.shape={idx.shape} {idx.max()}')
+   # logger.info(f'sg: idx.shape={idx.shape} {idx.max()}')
    grouped_xyz = index_points(xyz, idx) # [B, npoint, nsample, C]
-   logger.info(f'sg: grouped_xyz={grouped_xyz.shape}')
+   # logger.info(f'sg: grouped_xyz={grouped_xyz.shape}')
    # grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C)
 
    grouped_points = index_points(points, idx)
+   # logger.info(f'sg: grouped_points={grouped_points.shape}')
    new_points = grouped_points
    return new_xyz, new_points
 
@@ -174,8 +175,7 @@ def sample_and_group_all(xyz, points):
    B, N, C = xyz.shape
    new_xyz = torch.zeros(B, 1, C).to(device)
    grouped_xyz = xyz.view(B, 1, N, C)
-   
-   new_points = points
+   new_points = points.view(B, 1, N, -1)
 
    return new_xyz, new_points
 
@@ -207,26 +207,28 @@ class PointNetSetAbstraction(nn.Module):
       # xyz = xyz.permute(0, 2, 1)
       # if points is not None:
       #    points = points.permute(0, 2, 1)
-      logger.info(f'xyz.shape={xyz.shape} points.shape={points.shape}')
+      # logger.info(f'A xyz.shape={xyz.shape} points.shape={points.shape}')
 
       if self.group_all:
          new_xyz, new_points = sample_and_group_all(xyz, points)
       else:
          new_xyz, new_points = sample_and_group(self.npoint, self.radius, self.nsample, xyz, points)
-      logger.info(f'new_xyz.shape={new_xyz.shape} new_points.shape={new_points.shape}')
+      
+      # logger.info(f'B new_xyz.shape={new_xyz.shape} new_points.shape={new_points.shape}')
+      new_points = new_points.permute(0, 3, 2, 1) # [B, C+D, nsample,npoint]
+      
       # new_xyz: sampled points position data, [B, npoint, C]
       # new_points: sampled points data, [B, npoint, nsample, C+D]
-      # logger.info(f'new_points.shape={new_points.shape}')
-      new_points = new_points.permute(0, 3, 1, 2) # [B, C+D, nsample,npoint]
-      # logger.info(f'new_points.shape={new_points.shape}')
+      # logger.info(f'C new_points.shape={new_points.shape}')
       for i, conv in enumerate(self.mlp_convs):
          bn = self.mlp_bns[i]
-         logger.info(f'new_points.shape={new_points.shape}')
          new_points =  F.relu(bn(conv(new_points)))
+         # logger.info(f'D new_points.shape={new_points.shape}')
 
       new_points = torch.max(new_points, 2)[0]
+      new_points = new_points.permute(0, 2, 1) # [B, nsample, D']
       # new_xyz = new_xyz.permute(0, 2, 1)
-      logger.info(f'new_xyz.shape={new_xyz.shape} new_points.shape={new_points.shape}')
+      # # logger.info(f'E new_xyz.shape={new_xyz.shape} new_points.shape={new_points.shape}')
       return new_xyz, new_points
 
 
@@ -318,6 +320,11 @@ class PointNetFeaturePropagation(nn.Module):
       B, N, C = xyz1.shape
       _, S, _ = xyz2.shape
 
+      # if points1 is not None:
+      #    logger.info(f'xyz1.shape={xyz1.shape} xyz2.shape={xyz2.shape} points1.shape={points1.shape} points2.shape={points2.shape}')
+      # else:
+      #    logger.info(f'xyz1.shape={xyz1.shape} xyz2.shape={xyz2.shape} points2.shape={points2.shape}')
+
       if S == 1:
          interpolated_points = points2.repeat(1, N, 1)
       else:
@@ -329,6 +336,8 @@ class PointNetFeaturePropagation(nn.Module):
          norm = torch.sum(dist_recip, dim=2, keepdim=True)
          weight = dist_recip / norm
          interpolated_points = torch.sum(index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2)
+      
+      # logger.info(f'interpolated_points.shape={interpolated_points.shape}')
 
       if points1 is not None:
          # points1 = points1.permute(0, 2, 1)
@@ -336,8 +345,11 @@ class PointNetFeaturePropagation(nn.Module):
       else:
          new_points = interpolated_points
 
-      # new_points = new_points.permute(0, 2, 1)
+      # logger.info(f'new_points.shape={new_points.shape}')
+
+      new_points = new_points.permute(0, 2, 1)
       for i, conv in enumerate(self.mlp_convs):
          bn = self.mlp_bns[i]
          new_points = F.relu(bn(conv(new_points)))
+      new_points = new_points.permute(0, 2, 1)
       return new_points

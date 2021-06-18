@@ -216,25 +216,27 @@ def train_model(model,trainds,testds,config,device,writer=None):
          class_weights = class_weights.to(device)
          nonzero_mask = nonzero_mask.to(device)
 
-         logger.info(f'input_shape={inputs.shape}')
+         logger.debug('input_shape=%s',inputs.shape)
          
          # zero grads
          opt.zero_grad()
          
          # model forward pass
          outputs,endpoints = model(inputs)
+         logger.debug('outputs=%s endpoints=%s',outputs.shape,endpoints.shape)
          
          # set the weights
          if balanced_loss:
             weights = class_weights
-            nonzero_to_class_scaler = torch.sum(nonzero_mask.type(torch.float32)) / torch.sum(class_weights.type(tf.float32))
+            nonzero_to_class_scaler = torch.sum(nonzero_mask.type(torch.float32)) / torch.sum(class_weights.type(torch.float32))
          else:
             weights = nonzero_mask
             nonzero_to_class_scaler = 1.
 
          # loss
-         logger.info(f'outputs={outputs.shape} targets={targets.shape}')
-         loss_value = loss_func(outputs,targets)
+         logger.debug('outputs=%s targets=%s weights=%s',outputs.shape,targets.shape,weights.shape)
+         loss_value = loss_func(outputs,targets.long())
+         logger.debug('loss_value=%s',loss_value.shape)
          loss_value = torch.sum(loss_value * weights) * nonzero_to_class_scaler
          ave_loss.add_value(float(loss_value))
 
@@ -250,12 +252,12 @@ def train_model(model,trainds,testds,config,device,writer=None):
          # print statistics
          if batch_counter % status == 0:
             
-            logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds),ave_loss.calc_mean(),ave_acc.calc_mean())
+            logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds),ave_loss.mean(),ave_acc.mean())
 
             if writer and rank == 0:
                global_batch = epoch * len(trainds) + batch_counter
-               writer.add_scalars('loss',{'train':ave_loss.calc_mean()},global_batch)
-               writer.add_scalars('accuracy',{'train':ave_acc.calc_mean()},global_batch)
+               writer.add_scalars('loss',{'train':ave_loss.mean()},global_batch)
+               writer.add_scalars('accuracy',{'train':ave_acc.mean()},global_batch)
                writer.add_histogram('input_trans',endpoints['input_trans'].view(-1),global_batch)
 
             ave_loss = CalcMean.CalcMean()
@@ -307,8 +309,8 @@ def train_model(model,trainds,testds,config,device,writer=None):
          if valid_batch_counter > nval_tests:
             break
 
-      mean_acc = vacc.calc_mean()
-      mean_loss = vloss.calc_mean()
+      mean_acc = vacc.mean()
+      mean_loss = vloss.mean()
       if config['hvd'] is not None:
          mean_acc  = config['hvd'].allreduce(torch.tensor([mean_acc]))
          mean_loss = config['hvd'].allreduce(torch.tensor([mean_loss]))
@@ -320,11 +322,11 @@ def train_model(model,trainds,testds,config,device,writer=None):
          writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
          if 'mean_class_iou' == config['loss']['acc']:
             for i in range(nclasses):
-               writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].calc_mean()},global_batch)
+               writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].mean()},global_batch)
          
       logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter + 1)
       if 'mean_class_iou' == config['loss']['acc']:
-         logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.calc_mean() for x in vclass_acc])
+         logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.mean() for x in vclass_acc])
 
       model.train()
 

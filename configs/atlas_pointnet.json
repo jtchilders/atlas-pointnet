@@ -27,7 +27,7 @@
       "args": {
          "reduction":                  "none"
       },
-      "balanced":                      false
+      "balanced":                      true
    },
    "accuracy": {
       "name":                          "softmax_accuracy"
