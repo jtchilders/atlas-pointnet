@@ -88,7 +88,8 @@ def main():
 
    device = torch.device('cpu')
    if torch.cuda.is_available():
-      device = torch.device('cuda')
+      device = torch.device('cuda:%d' % local_rank)
+      torch.cuda.set_device(device)
 
    logger.warning('rank %6s of %6s    local rank %6s of %6s',rank,nranks,local_rank,local_size)
    logger.info('hostname:           %s',socket.gethostname())
@@ -147,6 +148,8 @@ def main():
    # setup tensorboard
    writer = None
    if args.logdir and rank == 0:
+      if not os.path.exists(args.logdir):
+         os.makedirs(args.logdir)
       writer = tensorboardX.SummaryWriter(args.logdir)
    
    logger.info('building model')
@@ -237,7 +240,7 @@ def train_model(model,trainds,testds,config,device,writer=None):
          logger.debug('outputs=%s targets=%s weights=%s',outputs.shape,targets.shape,weights.shape)
          loss_value = loss_func(outputs,targets.long())
          logger.debug('loss_value=%s',loss_value.shape)
-         loss_value = torch.sum(loss_value * weights) * nonzero_to_class_scaler
+         loss_value = torch.mean(loss_value * weights) * nonzero_to_class_scaler
          ave_loss.add_value(float(loss_value))
 
          # calc acc
@@ -252,13 +255,13 @@ def train_model(model,trainds,testds,config,device,writer=None):
          # print statistics
          if batch_counter % status == 0:
             
-            logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds),ave_loss.mean(),ave_acc.mean())
+            logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds)/nranks,ave_loss.mean(),ave_acc.mean())
 
             if writer and rank == 0:
                global_batch = epoch * len(trainds) + batch_counter
                writer.add_scalars('loss',{'train':ave_loss.mean()},global_batch)
                writer.add_scalars('accuracy',{'train':ave_acc.mean()},global_batch)
-               writer.add_histogram('input_trans',endpoints['input_trans'].view(-1),global_batch)
+               #writer.add_histogram('input_trans',endpoints['input_trans'].view(-1),global_batch)
 
             ave_loss = CalcMean.CalcMean()
             ave_acc = CalcMean.CalcMean()
@@ -280,31 +283,31 @@ def train_model(model,trainds,testds,config,device,writer=None):
 
       vloss = CalcMean.CalcMean()
       vacc = CalcMean.CalcMean()
-      if 'mean_class_iou' == config['loss']['acc']:
-         vclass_acc = [CalcMean.CalcMean() for _ in range(nclasses)]
 
-      for valid_batch_counter,(inputs,weights,targets) in enumerate(validds_itr):
-         logger.info('validation batch %s of %s',valid_batch_counter,len(validds))
+      for valid_batch_counter,(inputs,targets,class_weights,nonzero_mask) in enumerate(test_loader):
+         logger.info('validation batch %s of %s',valid_batch_counter,len(testds)/nranks)
 
          inputs = inputs.to(device)
          targets = targets.to(device)
-         weights = weights.to(device)
+         class_weights = class_weights.to(device)
+         nonzero_mask = nonzero_mask.to(device)
+
+         # set the weights
+         if balanced_loss:
+            weights = class_weights
+            nonzero_to_class_scaler = torch.sum(nonzero_mask.type(torch.float32)) / torch.sum(class_weights.type(torch.float32))
+         else:
+            weights = nonzero_mask
+            nonzero_to_class_scaler = 1.
 
          outputs,endpoints = model(inputs)
-         del inputs
 
-         loss_value = loss(outputs,targets,endpoints,weights,device)
-         del endpoints,weights
+         loss_value = loss_func(outputs,targets.long())
+         loss_value = torch.sum(loss_value * class_weights) * nonzero_to_class_scaler
          vloss.add_value(float(loss_value))
          
-         acc_value = acc(outputs,targets,device)
-         if 'mean_class_iou' == config['loss']['acc']:
-            for i in range(nclasses):
-               vclass_acc[i].add_value(float(acc_value[i]))
-         else:
-            vacc.add_value(float(acc_value))
-
-         del acc_value,targets,loss_value,outputs
+         acc_value = acc_func(outputs,targets,weights)
+         vacc.add_value(float(acc_value))
 
          if valid_batch_counter > nval_tests:
             break
@@ -320,13 +323,10 @@ def train_model(model,trainds,testds,config,device,writer=None):
          global_batch = epoch * len(trainds) + batch_counter
          writer.add_scalars('loss',{'valid':mean_loss},global_batch)
          writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
-         if 'mean_class_iou' == config['loss']['acc']:
-            for i in range(nclasses):
-               writer.add_scalars('class_accuracy',{'valid_%i' % i:vclass_acc[i].mean()},global_batch)
          
-      logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds),mean_loss,mean_acc,valid_batch_counter + 1)
+      logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds)/nranks,mean_loss,mean_acc,valid_batch_counter + 1)
       if 'mean_class_iou' == config['loss']['acc']:
-         logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds),['%6.4f' % x.mean() for x in vclass_acc])
+         logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds)/nranks,['%6.4f' % x.mean() for x in vclass_acc])
 
       model.train()
 
