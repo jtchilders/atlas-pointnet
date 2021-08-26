@@ -21,11 +21,11 @@ def main():
    parser.add_argument('-c','--config_file',help='configuration file in json format',required=True)
    parser.add_argument('--num_files','-n', default=-1, type=int,
                        help='limit the number of files to process. default is all')
-   parser.add_argument('--model_save',default='model_saves',help='base name of saved model parameters for later loading')
+   parser.add_argument('--model_save',help='base name of saved model parameters for later loading')
    parser.add_argument('--nsave',default=100,type=int,help='frequency in batch number to save model')
 
    parser.add_argument('--nval',default=100,type=int,help='frequency to evaluate validation sample in batch numbers')
-   parser.add_argument('--nval_tests',default=1,type=int,help='number batches to test per validation run')
+   parser.add_argument('--nval_tests',default=-1,type=int,help='number batches to test per validation run')
 
    parser.add_argument('--status',default=20,type=int,help='frequency to print loss status in batch numbers')
 
@@ -42,6 +42,8 @@ def main():
    parser.add_argument('-l','--logdir',help='log directory for tensorboardx')
 
    parser.add_argument('--horovod',default=False, action='store_true', help="Setup for distributed training")
+
+   parser.add_argument('--cpu-only',default=False, action='store_true', help='set to force CPU only running')
 
 
    parser.add_argument('--debug', dest='debug', default=False, action='store_true', help="Set Logger to DEBUG")
@@ -87,9 +89,13 @@ def main():
                        filename=args.logfilename)
 
    device = torch.device('cpu')
-   if torch.cuda.is_available():
+   if torch.cuda.is_available() and not args.cpu_only:
       device = torch.device('cuda:%d' % local_rank)
       torch.cuda.set_device(device)
+
+   model_save = args.model_save
+   if model_save is None:
+      model_save = os.path.join(args.logdir,'model')
 
    logger.warning('rank %6s of %6s    local rank %6s of %6s',rank,nranks,local_rank,local_size)
    logger.info('hostname:           %s',socket.gethostname())
@@ -101,7 +107,7 @@ def main():
 
    logger.info('config file:        %s',args.config_file)
    logger.info('num files:          %s',args.num_files)
-   logger.info('model_save:         %s',args.model_save)
+   logger.info('model_save:         %s',model_save)
    logger.info('random_seed:        %s',args.random_seed)
    logger.info('valid_only:         %s',args.valid_only)
    logger.info('nsave:              %s',args.nsave)
@@ -111,6 +117,7 @@ def main():
    logger.info('input_model_pars:   %s',args.input_model_pars)
    logger.info('epochs:             %s',args.epochs)
    logger.info('horovod:            %s',args.horovod)
+   logger.info('cpu_only:           %s',args.cpu_only)
    logger.info('logdir:             %s',args.logdir)
 
    np.random.seed(args.random_seed)
@@ -124,9 +131,10 @@ def main():
    config_file['nval'] = args.nval
    config_file['nval_tests'] = args.nval_tests
    config_file['nsave'] = args.nsave
-   config_file['model_save'] = args.model_save
+   config_file['model_save'] = model_save
    config_file['valid_only'] = args.valid_only
    config_file['batch_limiter'] = args.batch_limiter
+   config_file['cpu_only'] = args.cpu_only
 
    if args.valid_only and not args.input_model_pars:
       logger.error('if valid_only set, must provide input model')
@@ -179,6 +187,7 @@ def train_model(model,trainds,testds,config,device,writer=None):
    model_save = config['model_save']
    rank = config['rank']
    nranks = config['nranks']
+   hvd = config['hvd']
 
    ## create samplers for these datasets
    train_sampler = torch.utils.data.distributed.DistributedSampler(trainds,nranks,rank,shuffle=True,drop_last=True)
@@ -199,8 +208,16 @@ def train_model(model,trainds,testds,config,device,writer=None):
 
    opt_func = optimizer.get_optimizer(config)
    opt = opt_func(model.parameters(),**config['optimizer']['args'])
+
    lrsched_func = optimizer.get_learning_rate_scheduler(config)
    lrsched = lrsched_func(opt,**config['lr_schedule']['args'])
+
+   # Add Horovod Distributed Optimizer
+   if hvd:
+      opt = hvd.DistributedOptimizer(opt, named_parameters=model.named_parameters())
+      
+      # Broadcast parameters from rank 0 to all other processes.
+      hvd.broadcast_parameters(model.state_dict(), root_rank=0)
 
    model.to(device)
 
@@ -209,8 +226,7 @@ def train_model(model,trainds,testds,config,device,writer=None):
 
       train_sampler.set_epoch(epoch)
       test_sampler.set_epoch(epoch)
-
-      model.train()
+      model.to(device)
       for batch_counter,(inputs,targets,class_weights,nonzero_mask) in enumerate(train_loader):
          
          # move data to device
@@ -218,15 +234,10 @@ def train_model(model,trainds,testds,config,device,writer=None):
          targets = targets.to(device)
          class_weights = class_weights.to(device)
          nonzero_mask = nonzero_mask.to(device)
-
-         logger.debug('input_shape=%s',inputs.shape)
          
          # zero grads
          opt.zero_grad()
-         
-         # model forward pass
          outputs,endpoints = model(inputs)
-         logger.debug('outputs=%s endpoints=%s',outputs.shape,endpoints.shape)
          
          # set the weights
          if balanced_loss:
@@ -234,17 +245,10 @@ def train_model(model,trainds,testds,config,device,writer=None):
             nonzero_to_class_scaler = torch.sum(nonzero_mask.type(torch.float32)) / torch.sum(class_weights.type(torch.float32))
          else:
             weights = nonzero_mask
-            nonzero_to_class_scaler = 1.
+            nonzero_to_class_scaler = torch.ones(1,device=device)
 
-         # loss
-         logger.debug('outputs=%s targets=%s weights=%s',outputs.shape,targets.shape,weights.shape)
          loss_value = loss_func(outputs,targets.long())
-         logger.debug('loss_value=%s',loss_value.shape)
          loss_value = torch.mean(loss_value * weights) * nonzero_to_class_scaler
-         ave_loss.add_value(float(loss_value))
-
-         # calc acc
-         ave_acc.add_value(float(acc_func(outputs,targets,weights)))
          
          # backward calc grads
          loss_value.backward()
@@ -252,13 +256,19 @@ def train_model(model,trainds,testds,config,device,writer=None):
          # apply grads
          opt.step()
 
+         ave_loss.add_value(float(loss_value.to('cpu')))
+
+         # calc acc
+         ave_acc.add_value(float(acc_func(outputs,targets,weights).to('cpu')))
+         
+
          # print statistics
          if batch_counter % status == 0:
             
-            logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds)/nranks,ave_loss.mean(),ave_acc.mean())
+            logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds)/nranks/batch_size,ave_loss.mean(),ave_acc.mean())
 
             if writer and rank == 0:
-               global_batch = epoch * len(trainds) + batch_counter
+               global_batch = epoch * len(trainds)/nranks/batch_size + batch_counter
                writer.add_scalars('loss',{'train':ave_loss.mean()},global_batch)
                writer.add_scalars('accuracy',{'train':ave_acc.mean()},global_batch)
                #writer.add_histogram('input_trans',endpoints['input_trans'].view(-1),global_batch)
@@ -266,69 +276,68 @@ def train_model(model,trainds,testds,config,device,writer=None):
             ave_loss = CalcMean.CalcMean()
             ave_acc = CalcMean.CalcMean()
 
-         # periodically save the model
-         if batch_counter % nsave == 0 and rank == 0:
-            torch.save(model.state_dict(),model_save + '_%05d_%05d.torch_model_state_dict' % (epoch,batch_counter))
-         
          # release tensors for memory
          del inputs,targets,weights,endpoints,loss_value
+
+         if config['batch_limiter'] and batch_counter > config['batch_limiter']:
+            logger.info('batch limiter enabled, stop training early')
+            break
 
       # save at end of epoch
       torch.save(model.state_dict(),model_save + '_%05d.torch_model_state_dict' % epoch)
       
+      if nval_tests == -1:
+         nval_tests = len(testds)/nranks/batch_size
       logger.info('epoch %s complete, running validation on %s batches',epoch,nval_tests)
 
+      model.to(device)
       # every epoch, evaluate validation data set
-      model.eval()
+      with torch.no_grad():
 
-      vloss = CalcMean.CalcMean()
-      vacc = CalcMean.CalcMean()
+         vloss = CalcMean.CalcMean()
+         vacc = CalcMean.CalcMean()
 
-      for valid_batch_counter,(inputs,targets,class_weights,nonzero_mask) in enumerate(test_loader):
-         logger.info('validation batch %s of %s',valid_batch_counter,len(testds)/nranks)
+         for valid_batch_counter,(inputs,targets,class_weights,nonzero_mask) in enumerate(test_loader):
+            
+            inputs = inputs.to(device)
+            targets = targets.to(device)
+            class_weights = class_weights.to(device)
+            nonzero_mask = nonzero_mask.to(device)
 
-         inputs = inputs.to(device)
-         targets = targets.to(device)
-         class_weights = class_weights.to(device)
-         nonzero_mask = nonzero_mask.to(device)
+            # set the weights
+            if balanced_loss:
+               weights = class_weights
+               nonzero_to_class_scaler = torch.sum(nonzero_mask.type(torch.float32)) / torch.sum(class_weights.type(torch.float32))
+            else:
+               weights = nonzero_mask
+               nonzero_to_class_scaler = torch.ones(1,device=device)
 
-         # set the weights
-         if balanced_loss:
-            weights = class_weights
-            nonzero_to_class_scaler = torch.sum(nonzero_mask.type(torch.float32)) / torch.sum(class_weights.type(torch.float32))
-         else:
-            weights = nonzero_mask
-            nonzero_to_class_scaler = 1.
+            outputs,endpoints = model(inputs)
+            
+            loss_value = loss_func(outputs,targets.long())
+            loss_value = torch.mean(loss_value * weights) * nonzero_to_class_scaler
+            vloss.add_value(float(loss_value.to('cpu')))
+            
+            # calc acc
+            vacc.add_value(float(acc_func(outputs,targets,weights).to('cpu')))
 
-         outputs,endpoints = model(inputs)
+            if valid_batch_counter > nval_tests:
+               break
 
-         loss_value = loss_func(outputs,targets.long())
-         loss_value = torch.sum(loss_value * class_weights) * nonzero_to_class_scaler
-         vloss.add_value(float(loss_value))
-         
-         acc_value = acc_func(outputs,targets,weights)
-         vacc.add_value(float(acc_value))
-
-         if valid_batch_counter > nval_tests:
-            break
-
-      mean_acc = vacc.mean()
-      mean_loss = vloss.mean()
-      if config['hvd'] is not None:
-         mean_acc  = config['hvd'].allreduce(torch.tensor([mean_acc]))
-         mean_loss = config['hvd'].allreduce(torch.tensor([mean_loss]))
+         mean_acc = vacc.mean()
+         mean_loss = vloss.mean()
+         # if config['hvd'] is not None:
+         #    mean_acc  = config['hvd'].allreduce(torch.tensor([mean_acc]))
+         #    mean_loss = config['hvd'].allreduce(torch.tensor([mean_loss]))
       
-      # add validation to tensorboard
-      if writer and rank == 0:
-         global_batch = epoch * len(trainds) + batch_counter
-         writer.add_scalars('loss',{'valid':mean_loss},global_batch)
-         writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
+         # add validation to tensorboard
+         if writer and rank == 0:
+            global_batch = epoch * len(trainds)/nranks/batch_size + batch_counter
+            writer.add_scalars('loss',{'valid':mean_loss},global_batch)
+            writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
          
-      logger.info('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds)/nranks,mean_loss,mean_acc,valid_batch_counter + 1)
-      if 'mean_class_iou' == config['loss']['acc']:
-         logger.info('>[%3d of %3d, %5d of %5d]<<< valid class acc: %s',epoch + 1,epochs,batch_counter,len(trainds)/nranks,['%6.4f' % x.mean() for x in vclass_acc])
-
-      model.train()
+         logger.warning('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds)/nranks/batch_size,mean_loss,mean_acc,valid_batch_counter + 1)
+         
 
       # update learning rate
       lrsched.step()        
