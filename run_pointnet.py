@@ -188,6 +188,7 @@ def train_model(model,trainds,testds,config,device,writer=None):
    rank = config['rank']
    nranks = config['nranks']
    hvd = config['hvd']
+   num_classes = config['data']['num_classes']
 
    ## create samplers for these datasets
    train_sampler = torch.utils.data.distributed.DistributedSampler(trainds,nranks,rank,shuffle=True,drop_last=True)
@@ -296,6 +297,8 @@ def train_model(model,trainds,testds,config,device,writer=None):
 
          vloss = CalcMean.CalcMean()
          vacc = CalcMean.CalcMean()
+         
+         vious = [ CalcMean.CalcMean() for i in range(num_classes) ]
 
          for valid_batch_counter,(inputs,targets,class_weights,nonzero_mask) in enumerate(test_loader):
             
@@ -303,6 +306,7 @@ def train_model(model,trainds,testds,config,device,writer=None):
             targets = targets.to(device)
             class_weights = class_weights.to(device)
             nonzero_mask = nonzero_mask.to(device)
+
 
             # set the weights
             if balanced_loss:
@@ -321,6 +325,11 @@ def train_model(model,trainds,testds,config,device,writer=None):
             # calc acc
             vacc.add_value(float(acc_func(outputs,targets,weights).to('cpu')))
 
+            # calc ious
+            ious = get_ious(outputs,targets,weights,num_classes)
+            for i in range(num_classes):
+               vious[i].add_value(float(ious[i]))
+
             if valid_batch_counter > nval_tests:
                break
 
@@ -329,20 +338,38 @@ def train_model(model,trainds,testds,config,device,writer=None):
          # if config['hvd'] is not None:
          #    mean_acc  = config['hvd'].allreduce(torch.tensor([mean_acc]))
          #    mean_loss = config['hvd'].allreduce(torch.tensor([mean_loss]))
-      
+         mious = float(torch.sum(torch.FloatTensor([ x.mean() for x in vious]))) / num_classes
+         ious_out = {'jet':vious[0].mean(),'electron':vious[1].mean(),'bkgd':vious[2].mean(),'all':mious}
          # add validation to tensorboard
          if writer and rank == 0:
             global_batch = epoch * len(trainds)/nranks/batch_size + batch_counter
             writer.add_scalars('loss',{'valid':mean_loss},global_batch)
             writer.add_scalars('accuracy',{'valid':mean_acc},global_batch)
+            writer.add_scalars('IoU',ious_out,global_batch)
+            
          
          logger.warning('>[%3d of %3d, %5d of %5d]<<< ave valid loss: %6.4f ave valid acc: %6.4f on %s batches >>>',epoch + 1,epochs,batch_counter,len(trainds)/nranks/batch_size,mean_loss,mean_acc,valid_batch_counter + 1)
+         logger.warning('      >> ious: %s',ious_out)
          
 
       # update learning rate
       lrsched.step()        
 
+def get_ious(pred,labels,weights,num_classes,smooth=1,point_axis=1):
+   pred = torch.nn.functional.softmax(pred)
+   pred = pred.argmax(dim=point_axis)
+   
+   ious = []
+   for i in range(num_classes):
+      class_pred = (pred == i).int() * weights
+      class_label = (labels == i).int() * weights
+      intersection = torch.sum(class_label * class_pred,dim=point_axis)
+      union = torch.sum(class_label,dim=point_axis) + torch.sum(class_pred,dim=point_axis) - intersection
+      iou = torch.mean( (intersection + smooth) / (union + smooth), dim=0 )
 
+      ious.append(iou)
+
+   return ious
 
 if __name__ == "__main__":
    main()
