@@ -78,7 +78,7 @@ class CSVDataset(torch.utils.data.Dataset):
          df['phi'] = df['phi'].apply(lambda x: x if x < np.pi else x - 2 * np.pi)
          # logger.info('new (x,y,z) = %s  new eta,phi = %s',df[['x','y','z']].to_numpy()[0],df[['eta','phi']].to_numpy()[0])
 
-      if self.xyz_norm and self.training:
+      if self.xyz_norm:
          df['x'] = normalize(df['x'])
          df['y'] = normalize(df['y'])
          df['z'] = normalize(df['z'])
