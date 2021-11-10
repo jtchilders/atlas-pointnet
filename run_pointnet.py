@@ -11,6 +11,12 @@ import tensorboardX
 import CalcMean
 import multiprocessing as mp
 
+# for autograd profile
+import contextlib
+@contextlib.contextmanager
+def dummycontext():
+    yield None
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,6 +51,10 @@ def main():
 
    parser.add_argument('--cpu-only',default=False, action='store_true', help='set to force CPU only running')
 
+   parser.add_argument('--device', dest='device', default='cpu', help='If set, use the selected device.')
+   parser.add_argument('--bf16', action='store_true', help='Datatype used: bf16')
+   parser.add_argument('--channels_last', action='store_true', help='Enable channels last format')
+   parser.add_argument('--profile', dest='profile', default=False, action='store_true', help="Enable Autograd profiling. Generate timeline_X.json files for each epoch")
 
    parser.add_argument('--debug', dest='debug', default=False, action='store_true', help="Set Logger to DEBUG")
    parser.add_argument('--error', dest='error', default=False, action='store_true', help="Set Logger to ERROR")
@@ -89,7 +99,18 @@ def main():
                        filename=args.logfilename)
 
    device = torch.device('cpu')
-   if torch.cuda.is_available() and not args.cpu_only:
+   if args.device == "xpu" and not args.cpu_only:
+      ipex_found = True
+      try:
+          import ipex
+      except ModuleNotFoundError as err:
+          ipex_found = False
+      # backward compatiblity
+      if not ipex_found:
+          # throw exception if neither ipex nor torch_ipex is found with xpu deivce
+          import torch_ipex
+      device = torch.device('xpu:%d' % local_rank)
+   elif torch.cuda.is_available() and not args.cpu_only:
       device = torch.device('cuda:%d' % local_rank)
       torch.cuda.set_device(device)
 
@@ -118,6 +139,9 @@ def main():
    logger.info('epochs:             %s',args.epochs)
    logger.info('horovod:            %s',args.horovod)
    logger.info('cpu_only:           %s',args.cpu_only)
+   logger.info('device:             %s',device)
+   logger.info('bf16:               %s',args.bf16)
+   logger.info('channels_last:      %s',args.channels_last)
    logger.info('logdir:             %s',args.logdir)
 
    np.random.seed(args.random_seed)
@@ -135,6 +159,8 @@ def main():
    config_file['valid_only'] = args.valid_only
    config_file['batch_limiter'] = args.batch_limiter
    config_file['cpu_only'] = args.cpu_only
+   config_file['bf16'] = args.bf16
+   config_file['channels_last'] = args.channels_last
 
    if args.valid_only and not args.input_model_pars:
       logger.error('if valid_only set, must provide input model')
@@ -142,7 +168,7 @@ def main():
 
    if args.batch > 0:
       logger.info('setting batch size from command line: %s', args.batch)
-      config_file['training']['batch_size'] = args.batch
+      config_file['data']['batch_size'] = args.batch
    if args.epochs > 0:
       logger.info('setting epochs from command line: %s', args.epochs)
       config_file['training']['epochs'] = args.epochs
@@ -164,6 +190,8 @@ def main():
    torch.manual_seed(args.random_seed)
 
    net = model.get_model(config_file)
+   if config_file['channels_last']:
+      net = net.channels_last()
 
    logger.info('model = \n %s',net)
 
@@ -173,10 +201,10 @@ def main():
    if args.valid_only:
       valid_model(net,validds,config_file)
    else:
-      train_model(net,trainds,testds,config_file,device,writer)
+      train_model(net,trainds,testds,config_file,device,writer,args.profile)
 
 
-def train_model(model,trainds,testds,config,device,writer=None):
+def train_model(model,trainds,testds,config,device,writer=None,profile=False):
    batch_size = config['data']['batch_size']
    status = config['training']['status']
    epochs = config['training']['epochs']
@@ -222,67 +250,88 @@ def train_model(model,trainds,testds,config,device,writer=None):
 
    model.to(device)
 
+   img_secs = []
    for epoch in range(epochs):
       logger.info(' epoch %s of %s',epoch,epochs)
+      run_time = 0
 
       train_sampler.set_epoch(epoch)
       test_sampler.set_epoch(epoch)
       model.to(device)
-      for batch_counter,(inputs,targets,class_weights,nonzero_mask) in enumerate(train_loader):
-         
-         # move data to device
-         inputs = inputs.to(device)
-         targets = targets.to(device)
-         class_weights = class_weights.to(device)
-         nonzero_mask = nonzero_mask.to(device)
-         
-         # zero grads
-         opt.zero_grad()
-         outputs,endpoints = model(inputs)
-         
-         # set the weights
-         if balanced_loss:
-            weights = class_weights
-            nonzero_to_class_scaler = torch.sum(nonzero_mask.type(torch.float32)) / torch.sum(class_weights.type(torch.float32))
-         else:
-            weights = nonzero_mask
-            nonzero_to_class_scaler = torch.ones(1,device=device)
 
-         loss_value = loss_func(outputs,targets.long())
-         loss_value = torch.mean(loss_value * weights) * nonzero_to_class_scaler
-         
-         # backward calc grads
-         loss_value.backward()
-
-         # apply grads
-         opt.step()
-
-         ave_loss.add_value(float(loss_value.to('cpu')))
-
-         # calc acc
-         ave_acc.add_value(float(acc_func(outputs,targets,weights).to('cpu')))
-         
-
-         # print statistics
-         if batch_counter % status == 0:
+      use_xpu = True if device == "xpu" else False
+      use_cuda = True if device == "cuda" else False
+      autograd_prof = torch.autograd.profiler.profile(use_cuda=use_cuda, use_xpu=use_xpu) if profile else dummycontext()
+      with autograd_prof as prof:
+         for batch_counter,(inputs,targets,class_weights,nonzero_mask) in enumerate(train_loader):
+            start_time = time.time()
+            if config['bf16']:
+               inputs = inputs.bfloat16()
+               targets = targets.bfloat16()
             
-            logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f acc: %6.4f',epoch + 1,epochs,batch_counter,len(trainds)/nranks/batch_size,ave_loss.mean(),ave_acc.mean())
+            # move data to device
+            inputs = inputs.to(device)
+            targets = targets.to(device)
+            class_weights = class_weights.to(device)
+            nonzero_mask = nonzero_mask.to(device)
+            
+            # zero grads
+            opt.zero_grad()
+            if config['channels_last']:
+               inputs = inputs.to(memory_format=torch.channels_last_1d)
+               #model = model.to(memory_format=torch.channels_last_1d)
 
-            if writer and rank == 0:
-               global_batch = epoch * len(trainds)/nranks/batch_size + batch_counter
-               writer.add_scalars('loss',{'train':ave_loss.mean()},global_batch)
-               writer.add_scalars('accuracy',{'train':ave_acc.mean()},global_batch)
-               #writer.add_histogram('input_trans',endpoints['input_trans'].view(-1),global_batch)
+            outputs,endpoints = model(inputs)
 
-            ave_loss = CalcMean.CalcMean()
-            ave_acc = CalcMean.CalcMean()
+            # set the weights
+            if balanced_loss:
+               weights = class_weights
+               nonzero_to_class_scaler = torch.sum(nonzero_mask.type(torch.float32)) / torch.sum(class_weights.type(torch.float32))
+            else:
+               weights = nonzero_mask
+               nonzero_to_class_scaler = torch.ones(1,device=device)
 
-         # release tensors for memory
-         del inputs,targets,weights,endpoints,loss_value
+            loss_value = loss_func(outputs,targets.long())
+            loss_value = torch.mean(loss_value * weights) * nonzero_to_class_scaler
+            
+            # backward calc grads
+            loss_value.backward()
 
-         if config['batch_limiter'] and batch_counter > config['batch_limiter']:
-            logger.info('batch limiter enabled, stop training early')
-            break
+            # apply grads
+            opt.step()
+
+            ave_loss.add_value(float(loss_value.to('cpu')))
+
+            # calc acc
+            ave_acc.add_value(float(acc_func(outputs,targets,weights).to('cpu')))
+
+            run_time += time.time() - start_time
+            # print statistics
+            if batch_counter % status == 0:
+               rate = config['training']['status'] * batch_size / run_time
+               run_time = 0
+               img_secs.append(rate)
+               logger.info('<[%3d of %3d, %5d of %5d]> train loss: %6.4f acc: %6.4f image/sec: %6.4f',
+                   epoch + 1,epochs,batch_counter,len(trainds)/nranks/batch_size,ave_loss.mean(),ave_acc.mean(),rate)
+
+               if writer and rank == 0:
+                  global_batch = epoch * len(trainds)/nranks/batch_size + batch_counter
+                  writer.add_scalars('loss',{'train':ave_loss.mean()},global_batch)
+                  writer.add_scalars('accuracy',{'train':ave_acc.mean()},global_batch)
+                  #writer.add_histogram('input_trans',endpoints['input_trans'].view(-1),global_batch)
+
+               ave_loss = CalcMean.CalcMean()
+               ave_acc = CalcMean.CalcMean()
+
+            # release tensors for memory
+            del inputs,targets,weights,endpoints,loss_value
+
+            if config['batch_limiter'] and batch_counter > config['batch_limiter']:
+               logger.info('batch limiter enabled, stop training early')
+               break
+
+      if profile:
+         prof.export_chrome_trace("timeline_epoch_" + str(epoch) + ".json")
 
       # save at end of epoch
       torch.save(model.state_dict(),model_save + '_%05d.torch_model_state_dict' % epoch)
@@ -354,6 +403,16 @@ def train_model(model,trainds,testds,config,device,writer=None):
 
       # update learning rate
       lrsched.step()        
+
+   warm_up = 4 if len(img_secs) > 5 else 0
+   img_sec_mean = np.mean(img_secs[warm_up:])
+   if hvd:
+       print('avg imgs/sec on rank %d: %.2f' % (rank, img_sec_mean))
+       logger.info('total imgs/sec on %d ranks: %.2f' % (nranks, nranks * img_sec_mean))
+   else:
+       logger.info('avg imgs/sec: %.2f' % (img_sec_mean))
+       logger.info('total imgs/sec: %.2f' % (img_sec_mean))
+
 
 def get_ious(pred,labels,weights,num_classes,smooth=1,point_axis=1):
    pred = torch.nn.functional.softmax(pred)

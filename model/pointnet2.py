@@ -64,6 +64,21 @@ class PointNet2(nn.Module):
       # x = x.permute(0, 2, 1)
       return x, l3_points
 
+   def channels_last(self):
+      self.sa1 = self.sa1.to(memory_format = torch.channels_last)
+      self.sa2 = self.sa2.to(memory_format = torch.channels_last)
+      self.sa3 = self.sa3.to(memory_format = torch.channels_last)
+      self.fp3 = self.fp3.to(memory_format = torch.channels_last_1d)
+      self.fp2 = self.fp2.to(memory_format = torch.channels_last_1d)
+      self.fp1 = self.fp1.to(memory_format = torch.channels_last_1d)
+
+      self.conv1 = self.conv1.to(memory_format = torch.channels_last_1d)
+      self.bn1 = self.bn1.to(memory_format = torch.channels_last_1d)
+      self.drop1 = self.drop1.to(memory_format = torch.channels_last_1d)
+      self.conv2 = self.conv2.to(memory_format = torch.channels_last_1d)
+
+      return self
+    
 
 class PointNet2A(nn.Module):
     def __init__(self, num_classes, num_features):
@@ -102,3 +117,21 @@ class PointNet2A(nn.Module):
         # x = F.log_softmax(x, dim=-1)
         # x = x.permute(0, 2, 1)
         return x, l4_points
+
+    def channels_last(self):
+        self.sa1 = self.sa1.to(memory_format = torch.channels_last)
+        self.sa2 = self.sa2.to(memory_format = torch.channels_last)
+        self.sa3 = self.sa3.to(memory_format = torch.channels_last)
+        self.sa4 = self.sa4.to(memory_format = torch.channels_last)
+        self.fp4 = self.fp4.to(memory_format = torch.channels_last_1d)
+        self.fp3 = self.fp3.to(memory_format = torch.channels_last_1d)
+        self.fp2 = self.fp2.to(memory_format = torch.channels_last_1d)
+        self.fp1 = self.fp1.to(memory_format = torch.channels_last_1d)
+  
+        self.conv1 = self.conv1.to(memory_format = torch.channels_last_1d)
+        self.bn1 = self.bn1.to(memory_format = torch.channels_last_1d)
+        self.drop1 = self.drop1.to(memory_format = torch.channels_last_1d)
+        self.conv2 = self.conv2.to(memory_format = torch.channels_last_1d)
+  
+        return self
+ 
