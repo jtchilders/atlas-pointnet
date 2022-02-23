@@ -85,7 +85,7 @@ def farthest_point_sample(xyz, npoint):
    # create empty vector for npoint number of centroids
    centroids = torch.zeros(B, npoint, dtype=torch.long,device=device)
    # for each input point, a distance
-   distance = torch.ones(B, N,device=device) * 1e10
+   distance = torch.ones(B, N, dtype=xyz.dtype, device=device) * 1e10
    # for each input set, the farthest point is randomly set between 0-N
    farthest = torch.randint(0, N, (B,), dtype=torch.long,device=device)
    # just [0...B]
@@ -244,6 +244,11 @@ class PointNetSetAbstraction(nn.Module):
       # logger.info(f'E new_xyz.shape={new_xyz.shape} new_points.shape={new_points.shape}')
       return new_xyz, new_points
 
+   def to(self, memory_format):
+      self.mlp_convs = self.mlp_convs.to(memory_format = memory_format)
+      self.mlp_bns = self.mlp_bns.to(memory_format = memory_format)
+      return self
+
 
 class PointNetSetAbstractionMsg(nn.Module):
    def __init__(self, npoint, radius_list, nsample_list, in_channel, mlp_list):
@@ -304,6 +309,9 @@ class PointNetSetAbstractionMsg(nn.Module):
       new_points_concat = torch.cat(new_points_list, dim=1)
       return new_xyz, new_points_concat
 
+   def to(self, memory_format):
+      self.mlp_convs = self.mlp_convs.to(memory_format = memory_format)
+      self.mlp_bns = self.mlp_bns.to(memory_format = memory_format)
 
 class PointNetFeaturePropagation(nn.Module):
    def __init__(self, in_channel, mlp):
@@ -401,3 +409,9 @@ class PointNetFeaturePropagation(nn.Module):
       # logger.info(f'2 new_points.shape={new_points.shape}')
 
       return new_points
+
+   def to(self, memory_format):
+      self.mlp_convs = self.mlp_convs.to(memory_format = memory_format)
+      self.mlp_bns = self.mlp_bns.to(memory_format = memory_format)
+      return self
+
