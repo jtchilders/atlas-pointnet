@@ -3,10 +3,12 @@ applying pointnet++ to ATLAS data.
 
 Running on JLSE 4 V100s using
 ``` bash
-mpirun -hostfile $COBALT_NODEFILE -n 4 python run_pointnet.py -c configs/jlse.json --logdir logdir/$(date "+%Y-%m-%d")/$TRIAL --horovod
+TRIAL=0 mpirun -hostfile $COBALT_NODEFILE -n 4 python run_pointnet.py -c configs/jlse.json --logdir logdir/$(date "+%Y-%m-%d")/$TRIAL --horovod
 ```
 After 30 epochs, reached 60% accuracy on training data, 58% on testing data.
-Image throughput is about 60 images/second/gpu.
+Image throughput is about 21 images/second/gpu.
+
+With a single process (no MPI), I see about 23 images/second throughput.
 
 The dataset used is found here:
 
