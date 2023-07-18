@@ -147,8 +147,11 @@ class CSVDataset(torch.utils.data.Dataset):
    @staticmethod
    def from_filelist(filelist_filename,config,training):
       filelist = []
+      basedir = ''
+      if 'filebase' in config['data']:
+         basedir = config['data']['filebase'] + '/'
       for line in open(filelist_filename):
-         filelist.append(line.strip())
+         filelist.append(basedir + line.strip())
 
       return CSVDataset(filelist,config,training)
 
